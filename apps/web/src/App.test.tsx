@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 vi.mock("./api/client", () => ({
+  resolveAssetUrl: vi.fn((imagePath: string | null) =>
+    imagePath ? `http://localhost:4000${imagePath}` : null,
+  ),
   getOverview: vi.fn(async () => ({
     generatedAt: "2026-03-14T00:00:00Z",
     gameweeks: [
@@ -25,6 +28,7 @@ vi.mock("./api/client", () => ({
         teamId: 1,
         teamName: "Arsenal",
         teamShortName: "ARS",
+        imagePath: "/assets/players/10.jpg",
         positionId: 3,
         positionName: "Midfielder",
         nowCost: 105,
@@ -75,7 +79,22 @@ vi.mock("./api/client", () => ({
         started: false,
       },
     ],
-    teams: [],
+    teams: [
+      {
+        id: 1,
+        name: "Arsenal",
+        shortName: "ARS",
+        strength: 5,
+        imagePath: "/assets/teams/1.jpg",
+      },
+      {
+        id: 2,
+        name: "Chelsea",
+        shortName: "CHE",
+        strength: 4,
+        imagePath: "/assets/teams/2.jpg",
+      },
+    ],
   })),
   getPlayers: vi.fn(async () => [
     {
@@ -86,6 +105,7 @@ vi.mock("./api/client", () => ({
       teamId: 1,
       teamName: "Arsenal",
       teamShortName: "ARS",
+      imagePath: "/assets/players/10.jpg",
       positionId: 3,
       positionName: "Midfielder",
       nowCost: 105,
@@ -127,6 +147,7 @@ vi.mock("./api/client", () => ({
       teamId: 1,
       teamName: "Arsenal",
       teamShortName: "ARS",
+      imagePath: "/assets/players/10.jpg",
       positionId: 3,
       positionName: "Midfielder",
       nowCost: 105,

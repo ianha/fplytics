@@ -24,12 +24,22 @@ afterEach(() => {
 describe("API routes", () => {
   it("returns queryable overview data for the API layer", async () => {
     const db = createDatabase(path.join(tempDir, "test.sqlite"));
+    const assetSyncStub = {
+      syncBootstrapAssets: async () => ({
+        playersDownloaded: 0,
+        teamsDownloaded: 0,
+        playerPlaceholdersGenerated: 0,
+        teamPlaceholdersGenerated: 0,
+        playersSkipped: 0,
+        teamsSkipped: 0,
+      }),
+    };
     const syncService = new SyncService(db, {
       getBootstrap: async () => bootstrapFixture,
       getFixtures: async () => fixturesFixture,
       getElementSummary: async (playerId: number) =>
         createElementSummaryFixture(playerId),
-    } as any);
+    } as any, undefined, assetSyncStub as any);
     await syncService.syncAll();
 
     const queryService = new QueryService(db);

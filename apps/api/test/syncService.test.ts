@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabase } from "../src/db/database.js";
 import { SyncService } from "../src/services/syncService.js";
 import {
@@ -11,6 +11,16 @@ import {
 } from "./fixtures.js";
 
 const tempDirs: string[] = [];
+const assetSyncStub = {
+  syncBootstrapAssets: vi.fn(async () => ({
+    playersDownloaded: 0,
+    teamsDownloaded: 0,
+    playerPlaceholdersGenerated: 0,
+    teamPlaceholdersGenerated: 0,
+    playersSkipped: 0,
+    teamsSkipped: 0,
+  })),
+};
 
 function makeDbPath() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fpl-api-test-"));
@@ -24,6 +34,10 @@ afterEach(() => {
   }
 });
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 describe("SyncService", () => {
   it("noops on a second full sync when the upstream snapshot has not changed", () => {
     const db = createDatabase(makeDbPath());
@@ -34,7 +48,7 @@ describe("SyncService", () => {
       getBootstrap: async () => bootstrapFixture,
       getFixtures: async () => fixturesFixture,
       getElementSummary,
-    } as any);
+    } as any, undefined, assetSyncStub as any);
 
     return service.syncAll().then(async () => {
       await service.syncAll();
@@ -88,6 +102,7 @@ describe("SyncService", () => {
           createElementSummaryFixture(playerId),
       } as any,
       { info, error },
+      assetSyncStub as any,
     );
 
     await service.syncAll();
@@ -114,7 +129,7 @@ describe("SyncService", () => {
       getBootstrap: async () => bootstrapFixture,
       getFixtures: async () => fixturesFixture,
       getElementSummary,
-    } as any);
+    } as any, undefined, assetSyncStub as any);
 
     await service.syncGameweek(1);
 
@@ -182,7 +197,7 @@ describe("SyncService", () => {
       getBootstrap: async () => bootstrapFixture,
       getFixtures: async () => fixturesFixture,
       getElementSummary,
-    } as any);
+    } as any, undefined, assetSyncStub as any);
 
     await expect(service.syncGameweek(1)).rejects.toThrow("Temporary upstream failure");
     await service.syncGameweek(1);
@@ -204,7 +219,7 @@ describe("SyncService", () => {
       getBootstrap: async () => bootstrapFixture,
       getFixtures: async () => fixturesFixture,
       getElementSummary,
-    } as any);
+    } as any, undefined, assetSyncStub as any);
 
     await service.syncGameweek(1);
     await service.syncGameweek(1, true);

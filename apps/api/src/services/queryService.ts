@@ -43,6 +43,7 @@ export class QueryService {
     return this.db
       .prepare(
         `SELECT id, name, short_name AS shortName, strength
+                , image_path AS imagePath
          FROM teams
          ORDER BY name`,
       )
@@ -120,6 +121,7 @@ export class QueryService {
       .prepare(
         `SELECT p.id, p.web_name AS webName, p.first_name AS firstName, p.second_name AS secondName,
                 p.team_id AS teamId, t.name AS teamName, t.short_name AS teamShortName,
+                p.image_path AS imagePath,
                 p.position_id AS positionId, pos.name AS positionName,
                 p.now_cost AS nowCost, p.total_points AS totalPoints, p.form,
                 p.selected_by_percent AS selectedByPercent, p.points_per_game AS pointsPerGame,
@@ -150,6 +152,7 @@ export class QueryService {
       .prepare(
         `SELECT p.id, p.web_name AS webName, p.first_name AS firstName, p.second_name AS secondName,
                 p.team_id AS teamId, t.name AS teamName, t.short_name AS teamShortName,
+                p.image_path AS imagePath,
                 p.position_id AS positionId, pos.name AS positionName,
                 p.now_cost AS nowCost, p.total_points AS totalPoints, p.form,
                 p.selected_by_percent AS selectedByPercent, p.points_per_game AS pointsPerGame,

@@ -1,6 +1,6 @@
 # @fpl/web — React Frontend
 
-A responsive React dashboard that consumes the local FPL API and presents player stats, fixtures, and gameweek data in an FPL-inspired UI.
+A responsive React dashboard that consumes the local FPL API and presents player stats, fixtures, team badges, and player portraits in an FPL-inspired UI.
 
 ---
 
@@ -22,6 +22,8 @@ When the page loads, two fetches fire simultaneously: `getOverview()` populates 
 Typing in the search input triggers a new `getPlayers(search)` call on every keystroke. The player list updates in real time, and the detail panel updates to show the first result of each new search.
 
 Clicking any player card calls `getPlayer(id)` and replaces the detail panel's content. The panel shows the player's full season stats, a table of their last 8 gameweeks (points, minutes, goals/assists, xGI, tackles), and a list of their upcoming fixtures.
+
+Player portraits and team badges are loaded from the local API asset paths stored in SQLite (`/assets/players/...` and `/assets/teams/...`), not from the FPL CDN directly.
 
 ---
 
@@ -120,6 +122,7 @@ The client wraps `fetch` with typed return values from `@fpl/contracts`. Base UR
 getOverview()          // → Promise<OverviewResponse>
 getPlayers(search?)    // → Promise<PlayerCard[]>
 getPlayer(playerId)    // → Promise<PlayerDetail>
+resolveAssetUrl(path)  // → string | null
 ```
 
 All functions throw an `Error` if the HTTP response is not ok (i.e., status is not in the 200–299 range). The caller is responsible for catching this and updating the `AsyncState` to `{ status: "error", message: error.message }`.

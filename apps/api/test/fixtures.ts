@@ -17,9 +17,9 @@ export const bootstrapFixture: BootstrapResponse = {
     },
   ],
   teams: [
-    { id: 1, name: "Arsenal", short_name: "ARS", strength: 5 },
-    { id: 2, name: "Chelsea", short_name: "CHE", strength: 4 },
-    { id: 3, name: "Liverpool", short_name: "LIV", strength: 5 },
+    { id: 1, code: 3, name: "Arsenal", short_name: "ARS", strength: 5 },
+    { id: 2, code: 8, name: "Chelsea", short_name: "CHE", strength: 4 },
+    { id: 3, code: 14, name: "Liverpool", short_name: "LIV", strength: 5 },
   ],
   element_types: [
     { id: 3, singular_name: "Midfielder", singular_name_short: "MID" },
@@ -27,6 +27,7 @@ export const bootstrapFixture: BootstrapResponse = {
   elements: [
     {
       id: 10,
+      code: 10010,
       web_name: "Saka",
       first_name: "Bukayo",
       second_name: "Saka",
@@ -56,10 +57,13 @@ export const bootstrapFixture: BootstrapResponse = {
       tackles: 54,
       recoveries: 146,
       defensive_contribution: 88,
+      photo: "10010.jpg",
+      team_code: 3,
       status: "a",
     },
     {
       id: 11,
+      code: 10011,
       web_name: "Salah",
       first_name: "Mohamed",
       second_name: "Salah",
@@ -89,10 +93,13 @@ export const bootstrapFixture: BootstrapResponse = {
       tackles: 38,
       recoveries: 121,
       defensive_contribution: 79,
+      photo: "10011.jpg",
+      team_code: 14,
       status: "a",
     },
     {
       id: 12,
+      code: 10012,
       web_name: "Palmer",
       first_name: "Cole",
       second_name: "Palmer",
@@ -122,6 +129,8 @@ export const bootstrapFixture: BootstrapResponse = {
       tackles: 47,
       recoveries: 132,
       defensive_contribution: 84,
+      photo: "10012.jpg",
+      team_code: 8,
       status: "a",
     },
   ],

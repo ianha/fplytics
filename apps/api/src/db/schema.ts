@@ -49,9 +49,12 @@ CREATE TABLE IF NOT EXISTS gameweeks (
 
 CREATE TABLE IF NOT EXISTS teams (
   id INTEGER PRIMARY KEY,
+  code INTEGER NOT NULL DEFAULT 0,
   name TEXT NOT NULL,
   short_name TEXT NOT NULL,
   strength INTEGER NOT NULL,
+  image_path TEXT,
+  image_source TEXT,
   updated_at TEXT NOT NULL
 );
 
@@ -64,6 +67,7 @@ CREATE TABLE IF NOT EXISTS positions (
 
 CREATE TABLE IF NOT EXISTS players (
   id INTEGER PRIMARY KEY,
+  code INTEGER NOT NULL DEFAULT 0,
   web_name TEXT NOT NULL,
   first_name TEXT NOT NULL,
   second_name TEXT NOT NULL,
@@ -96,6 +100,10 @@ CREATE TABLE IF NOT EXISTS players (
   tackles INTEGER NOT NULL DEFAULT 0,
   recoveries INTEGER NOT NULL DEFAULT 0,
   defensive_contribution INTEGER NOT NULL DEFAULT 0,
+  photo TEXT NOT NULL DEFAULT '',
+  team_code INTEGER NOT NULL DEFAULT 0,
+  image_path TEXT,
+  image_source TEXT,
   status TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY(team_id) REFERENCES teams(id),

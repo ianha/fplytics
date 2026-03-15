@@ -14,6 +14,7 @@ type BootstrapResponse = {
   }>;
   teams: Array<{
     id: number;
+    code: number;
     name: string;
     short_name: string;
     strength: number;
@@ -25,6 +26,7 @@ type BootstrapResponse = {
   }>;
   elements: Array<{
     id: number;
+    code: number;
     web_name: string;
     first_name: string;
     second_name: string;
@@ -54,6 +56,8 @@ type BootstrapResponse = {
     tackles: number;
     recoveries: number;
     defensive_contribution: number;
+    photo: string;
+    team_code: number;
     status: string;
   }>;
 };

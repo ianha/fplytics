@@ -95,6 +95,14 @@ input {
   background: linear-gradient(180deg, rgba(233, 0, 82, 0.08), rgba(55, 0, 60, 0.03));
 }
 
+.player-highlight-header,
+.detail-player-header,
+.player-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -183,6 +191,28 @@ input {
   cursor: pointer;
 }
 
+.player-image {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  object-fit: cover;
+  border: 1px solid var(--fpl-border);
+  background: linear-gradient(180deg, rgba(233, 0, 82, 0.08), rgba(55, 0, 60, 0.06));
+}
+
+.player-image-small {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.team-badge {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  margin-bottom: 0.35rem;
+}
+
 .player-card-header,
 .player-card-stats,
 .detail-grid {
@@ -225,4 +255,3 @@ input {
     display: grid;
   }
 }
-

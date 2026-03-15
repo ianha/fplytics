@@ -100,6 +100,7 @@ export function createDatabase(dbPath = env.dbPath) {
   db.exec(schemaSql);
   migratePlayerHistoryPrimaryKey(db);
   ensureColumns(db, "players", [
+    { name: "code", sql: "code INTEGER NOT NULL DEFAULT 0" },
     { name: "bonus", sql: "bonus INTEGER NOT NULL DEFAULT 0" },
     { name: "bps", sql: "bps INTEGER NOT NULL DEFAULT 0" },
     { name: "creativity", sql: "creativity REAL NOT NULL DEFAULT 0" },
@@ -139,6 +140,15 @@ export function createDatabase(dbPath = env.dbPath) {
       name: "defensive_contribution",
       sql: "defensive_contribution INTEGER NOT NULL DEFAULT 0",
     },
+    { name: "photo", sql: "photo TEXT NOT NULL DEFAULT ''" },
+    { name: "team_code", sql: "team_code INTEGER NOT NULL DEFAULT 0" },
+    { name: "image_path", sql: "image_path TEXT" },
+    { name: "image_source", sql: "image_source TEXT" },
+  ]);
+  ensureColumns(db, "teams", [
+    { name: "code", sql: "code INTEGER NOT NULL DEFAULT 0" },
+    { name: "image_path", sql: "image_path TEXT" },
+    { name: "image_source", sql: "image_source TEXT" },
   ]);
   ensureColumns(db, "player_history", [
     { name: "bonus", sql: "bonus INTEGER NOT NULL DEFAULT 0" },

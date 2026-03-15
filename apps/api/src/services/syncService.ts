@@ -6,6 +6,7 @@ import type {
 } from "../client/fplApiClient.js";
 import { FplApiClient } from "../client/fplApiClient.js";
 import { createHash } from "node:crypto";
+import { AssetSyncService } from "./assetSyncService.js";
 
 type SyncLogger = {
   info(message: string): void;
@@ -50,6 +51,7 @@ export class SyncService {
     private readonly db: AppDatabase,
     private readonly client = new FplApiClient(),
     private readonly logger?: SyncLogger,
+    private readonly assetSyncService = new AssetSyncService(db),
   ) {}
 
   private logInfo(message: string) {
@@ -133,8 +135,15 @@ export class SyncService {
       this.logInfo(`[run ${runId}] Fetching bootstrap data from FPL.`);
       const bootstrap = await this.client.getBootstrap();
       this.syncBootstrap(bootstrap);
+      const assetResult = await this.assetSyncService.syncBootstrapAssets(
+        bootstrap,
+        force,
+      );
       this.logInfo(
         `[run ${runId}] Bootstrap synced: ${bootstrap.events.length} gameweeks, ${bootstrap.teams.length} teams, ${bootstrap.elements.length} players.`,
+      );
+      this.logInfo(
+        `[run ${runId}] Assets synced: ${assetResult.playersDownloaded} player images downloaded, ${assetResult.teamsDownloaded} team images downloaded, ${assetResult.playerPlaceholdersGenerated} player placeholders generated, ${assetResult.teamPlaceholdersGenerated} team placeholders generated, ${assetResult.playersSkipped + assetResult.teamsSkipped} skipped.`,
       );
 
       this.logInfo(`[run ${runId}] Fetching fixtures from FPL.`);
@@ -186,8 +195,15 @@ export class SyncService {
       this.logInfo(`[run ${runId}] Fetching bootstrap data from FPL.`);
       const bootstrap = await this.client.getBootstrap();
       this.syncBootstrap(bootstrap);
+      const assetResult = await this.assetSyncService.syncBootstrapAssets(
+        bootstrap,
+        force,
+      );
       this.logInfo(
         `[run ${runId}] Bootstrap synced: ${bootstrap.events.length} gameweeks, ${bootstrap.teams.length} teams, ${bootstrap.elements.length} players.`,
+      );
+      this.logInfo(
+        `[run ${runId}] Assets synced: ${assetResult.playersDownloaded} player images downloaded, ${assetResult.teamsDownloaded} team images downloaded, ${assetResult.playerPlaceholdersGenerated} player placeholders generated, ${assetResult.teamPlaceholdersGenerated} team placeholders generated, ${assetResult.playersSkipped + assetResult.teamsSkipped} skipped.`,
       );
 
       this.logInfo(`[run ${runId}] Fetching fixtures from FPL.`);
@@ -276,9 +292,10 @@ export class SyncService {
          updated_at = excluded.updated_at`,
     );
     const insertTeam = this.db.prepare(
-      `INSERT INTO teams (id, name, short_name, strength, updated_at)
-       VALUES (@id, @name, @short_name, @strength, @updated_at)
+      `INSERT INTO teams (id, code, name, short_name, strength, updated_at)
+       VALUES (@id, @code, @name, @short_name, @strength, @updated_at)
        ON CONFLICT(id) DO UPDATE SET
+         code = excluded.code,
          name = excluded.name,
          short_name = excluded.short_name,
          strength = excluded.strength,
@@ -293,9 +310,10 @@ export class SyncService {
          updated_at = excluded.updated_at`,
     );
     const insertPlayer = this.db.prepare(
-      `INSERT INTO players (id, web_name, first_name, second_name, team_id, position_id, now_cost, total_points, form, selected_by_percent, points_per_game, goals_scored, assists, clean_sheets, minutes, bonus, bps, creativity, influence, threat, ict_index, expected_goals, expected_assists, expected_goal_involvements, expected_goal_performance, expected_assist_performance, expected_goal_involvement_performance, expected_goals_conceded, clean_sheets_per_90, starts, tackles, recoveries, defensive_contribution, status, updated_at)
-       VALUES (@id, @web_name, @first_name, @second_name, @team_id, @position_id, @now_cost, @total_points, @form, @selected_by_percent, @points_per_game, @goals_scored, @assists, @clean_sheets, @minutes, @bonus, @bps, @creativity, @influence, @threat, @ict_index, @expected_goals, @expected_assists, @expected_goal_involvements, @expected_goal_performance, @expected_assist_performance, @expected_goal_involvement_performance, @expected_goals_conceded, @clean_sheets_per_90, @starts, @tackles, @recoveries, @defensive_contribution, @status, @updated_at)
+      `INSERT INTO players (id, code, web_name, first_name, second_name, team_id, position_id, now_cost, total_points, form, selected_by_percent, points_per_game, goals_scored, assists, clean_sheets, minutes, bonus, bps, creativity, influence, threat, ict_index, expected_goals, expected_assists, expected_goal_involvements, expected_goal_performance, expected_assist_performance, expected_goal_involvement_performance, expected_goals_conceded, clean_sheets_per_90, starts, tackles, recoveries, defensive_contribution, photo, team_code, status, updated_at)
+       VALUES (@id, @code, @web_name, @first_name, @second_name, @team_id, @position_id, @now_cost, @total_points, @form, @selected_by_percent, @points_per_game, @goals_scored, @assists, @clean_sheets, @minutes, @bonus, @bps, @creativity, @influence, @threat, @ict_index, @expected_goals, @expected_assists, @expected_goal_involvements, @expected_goal_performance, @expected_assist_performance, @expected_goal_involvement_performance, @expected_goals_conceded, @clean_sheets_per_90, @starts, @tackles, @recoveries, @defensive_contribution, @photo, @team_code, @status, @updated_at)
        ON CONFLICT(id) DO UPDATE SET
+         code = excluded.code,
          web_name = excluded.web_name,
          first_name = excluded.first_name,
          second_name = excluded.second_name,
@@ -328,6 +346,8 @@ export class SyncService {
          tackles = excluded.tackles,
          recoveries = excluded.recoveries,
          defensive_contribution = excluded.defensive_contribution,
+         photo = excluded.photo,
+         team_code = excluded.team_code,
          status = excluded.status,
          updated_at = excluded.updated_at`,
     );
@@ -351,7 +371,14 @@ export class SyncService {
       }
 
       for (const team of bootstrap.teams) {
-        insertTeam.run({ ...team, short_name: team.short_name, updated_at: updatedAt });
+        insertTeam.run({
+          id: team.id,
+          code: team.code,
+          name: team.name,
+          short_name: team.short_name,
+          strength: team.strength,
+          updated_at: updatedAt,
+        });
       }
 
       for (const position of bootstrap.element_types) {
@@ -376,6 +403,7 @@ export class SyncService {
         );
         insertPlayer.run({
           id: player.id,
+          code: player.code,
           web_name: player.web_name,
           first_name: player.first_name,
           second_name: player.second_name,
@@ -412,6 +440,8 @@ export class SyncService {
           tackles: player.tackles,
           recoveries: player.recoveries,
           defensive_contribution: player.defensive_contribution,
+          photo: player.photo,
+          team_code: player.team_code,
           status: player.status,
           updated_at: updatedAt,
         });

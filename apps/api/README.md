@@ -16,6 +16,7 @@ Public FPL API
   └── fplApiClient.ts        fetches bootstrap, fixtures, player summaries
         └── rateLimiter.ts   enforces minimum interval between requests
               └── syncService.ts    orchestrates all sync logic
+                    └── assetSyncService.ts  downloads player/team JPEG files
                     └── database.ts  writes to SQLite (better-sqlite3)
 
 SQLite file (data/fpl.sqlite)
@@ -53,6 +54,7 @@ Run these from the repository root, or replace `npm run` with `npm run -w @fpl/a
 |---|---|---|
 | `PORT` | `4000` | Port the API listens on |
 | `DB_PATH` | `apps/api/data/fpl.sqlite` | Path to the SQLite database file, relative to the repo root or absolute |
+| `ASSETS_DIR` | `apps/api/data/assets` | Directory where local player/team JPEG files are stored |
 | `FPL_BASE_URL` | `https://fantasy.premierleague.com/api` | Base URL for the FPL API — only change this for testing |
 | `FPL_MIN_REQUEST_INTERVAL_MS` | `3000` | Minimum milliseconds between outbound FPL requests |
 
@@ -74,6 +76,8 @@ The database file is created automatically at `apps/api/data/fpl.sqlite` on firs
 - Adds any missing columns via `ALTER TABLE ... ADD COLUMN` for backward compatibility with existing database files that predate a new column
 - Migrates the `player_history` primary key from a single column to the composite `(player_id, round, opponent_team, kickoff_time)` if needed — this supports double gameweeks where a player faces two different opponents in the same round
 - Backfills derived performance columns (`expected_goal_performance`, etc.) for any existing rows that were written before those fields were added
+
+The API also serves the local asset directory statically at `/assets/*`. By default, a player image stored on disk at `apps/api/data/assets/players/10.jpg` is reachable at `http://localhost:4000/assets/players/10.jpg`.
 
 SQLite runs in WAL (Write-Ahead Logging) mode. In the default journal mode, SQLite locks the entire file for any write operation, which would prevent the API from serving read requests while the sync is writing. WAL mode separates reads and writes into different files, allowing concurrent reads even during an active write transaction. This is important because the sync can take 40+ minutes and you don't want the API to be blocked for the entire duration.
 
@@ -101,9 +105,12 @@ All 20 Premier League clubs, populated from bootstrap data.
 | Column | Type | Description |
 |---|---|---|
 | `id` | INTEGER PK | FPL team ID |
+| `code` | INTEGER | FPL's numeric team code used for official badge URLs |
 | `name` | TEXT | Full club name, e.g. `"Arsenal"` |
 | `short_name` | TEXT | Three-letter abbreviation, e.g. `"ARS"` |
 | `strength` | INTEGER | FPL's overall strength rating (used for fixture difficulty calculations) |
+| `image_path` | TEXT | Local API-served path to the cached/generated team badge JPEG |
+| `image_source` | TEXT | Source key used to decide whether the cached badge is still current |
 | `updated_at` | TEXT | ISO 8601 timestamp of last upsert |
 
 #### `positions`
@@ -200,6 +207,11 @@ Column reference:
 | `tackles` | INTEGER | Tackles this season |
 | `recoveries` | INTEGER | Recoveries this season |
 | `defensive_contribution` | INTEGER | Clearances, blocks, and interceptions combined |
+| `code` | INTEGER | FPL's numeric element code |
+| `photo` | TEXT | FPL's photo filename from bootstrap data, e.g. `"10010.jpg"` |
+| `team_code` | INTEGER | FPL's numeric team code copied onto the player row for asset syncing |
+| `image_path` | TEXT | Local API-served path to the cached/generated player JPEG |
+| `image_source` | TEXT | Source key used to decide whether the cached portrait is still current |
 | `status` | TEXT | Availability: `"a"` (available), `"d"` (doubtful), `"i"` (injured), `"s"` (suspended), `"u"` (unavailable) |
 | `updated_at` | TEXT | ISO 8601 timestamp of last upsert |
 
@@ -377,17 +389,18 @@ Audit log of every sync invocation. Useful for checking when data was last refre
 
 1. Fetch `/api/bootstrap-static/` — a single large JSON response containing all gameweeks, teams, positions, and every player's current season summary
 2. Upsert gameweeks, teams, positions, and players into the database (insert new rows, update existing ones)
-3. Fetch `/api/fixtures/` — all 380 matches
-4. Upsert all fixtures
-5. Compute a SHA-256 hash of the bootstrap players array + the fixtures array and compare it against the stored `full_snapshot` value in `sync_state`
-6. If the hash matches and every player already has `completed_snapshot = requested_snapshot`, the run exits as a no-op (unless `--force` was passed)
-7. For each player that is pending (never synced, previously errored, or completed_snapshot doesn't match the new hash):
+3. Download official team badges and player portraits into `ASSETS_DIR`, converting them to local JPEG files and generating placeholders when an official portrait returns 403/404
+4. Fetch `/api/fixtures/` — all 380 matches
+5. Upsert all fixtures
+6. Compute a SHA-256 hash of the bootstrap players array + the fixtures array and compare it against the stored `full_snapshot` value in `sync_state`
+7. If the hash matches and every player already has `completed_snapshot = requested_snapshot`, the run exits as a no-op (unless `--force` was passed)
+8. For each player that is pending (never synced, previously errored, or completed_snapshot doesn't match the new hash):
    - Fetch `/api/element-summary/{id}/` — season history and upcoming fixtures for that player
    - Calculate the three derived performance fields from the returned data
    - Delete and replace that player's `player_history` and `player_future_fixtures` rows in a single transaction
    - Update `player_sync_status` marking the player complete for this snapshot
-8. Update `full_snapshot` in `sync_state`
-9. Record the run result (success or failure) in `sync_runs`
+9. Update `full_snapshot` in `sync_state`
+10. Record the run result (success or failure) in `sync_runs`
 
 **Gameweek sync (`npm run sync -- --gameweek 29`):**
 
@@ -399,6 +412,8 @@ Steps 1–4 are identical. Then:
 8. Fetch and refresh only the players on those teams (~50 players instead of ~750)
 9. Mark the run complete
 
+Asset syncing is not snapshot-skipped. Each sync checks whether the local JPEG and source key already match. If they do, the asset is skipped. If a new player or team appears in bootstrap data, the corresponding local file is created during that same run. Passing `--force` disables that skip check and re-downloads player/team images even when the source key is unchanged.
+
 ### What the console output looks like
 
 The sync prints verbose progress as it runs. A typical full sync looks like this:
@@ -407,6 +422,7 @@ The sync prints verbose progress as it runs. A typical full sync looks like this
 [sync] Starting full sync
 [sync] Fetching bootstrap-static...
 [sync] Bootstrap fetched. Players: 750, Teams: 20, Gameweeks: 38.
+[sync] Assets synced. 742 player images downloaded, 78 player placeholders generated, 20 team images downloaded.
 [sync] Fetching fixtures...
 [sync] 380 fixtures upserted.
 [sync] Computing snapshot...
@@ -425,9 +441,24 @@ If you run the same command again without any upstream changes:
 ```
 [sync] Starting full sync
 [sync] Fetching bootstrap-static...
+[sync] Assets synced. 0 player images downloaded, 0 player placeholders generated, 0 team images downloaded, 770 skipped.
 [sync] Fetching fixtures...
 [sync] Snapshot unchanged. Nothing to do.
 ```
+
+### Local image assets
+
+Official image URLs are not stored in API responses. Instead, the sync stores local file paths in SQLite:
+
+- team badges: `/assets/teams/<teamId>.jpg`
+- player portraits: `/assets/players/<playerId>.jpg`
+
+This has two benefits:
+
+1. The frontend stays fast and does not depend on the Premier League CDN at runtime.
+2. Sync runs can backfill new players and teams immediately, keeping the local app self-contained.
+
+If FPL does not publish a portrait for a player yet, `assetSyncService.ts` generates a placeholder JPEG in the same local location so every player row still has a usable image file.
 
 ### Snapshot-aware resume
 

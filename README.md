@@ -16,6 +16,8 @@ A TypeScript monorepo that mirrors the public experience of [fantasy.premierleag
 
 - **React frontend with FPL-inspired design, player search, and per-player stat history.** A responsive dashboard that lets you browse the top players, search the full player pool, see fixture schedules, and dive into game-by-game history for any individual player.
 
+- **Local JPEG asset library for players and teams.** Sync runs download official player portraits and club badges into `apps/api/data/assets`, save their local paths in SQLite, and serve them from the API under `/assets/...`. If FPL has not published a portrait yet, the sync generates a local placeholder JPEG instead of failing.
+
 - **Advanced public metrics: xG, xA, xGI, xGP, xAP, xGIP, ICT index, tackles, recoveries.** Beyond the basic FPL points, the database stores expected-goals statistics and the three locally-derived performance fields (xGP, xAP, xGIP) that measure how much a player is over- or under-performing their expected output.
 
 - **Full game-by-game player history for the current season.** Every played fixture is stored individually so you can analyze trends, form, and home/away splits at the per-gameweek level.
@@ -128,9 +130,10 @@ Copy `.env.example` to `.env`. All variables have working defaults for local dev
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `4000` | Port the Express API listens on |
-| `DB_PATH` | `./fpl-app/apps/api/data/fpl.sqlite` | Path to the SQLite database file |
+| `DB_PATH` | `./apps/api/data/fpl.sqlite` | Path to the SQLite database file |
 | `FPL_BASE_URL` | `https://fantasy.premierleague.com/api` | Base URL for the public FPL API |
 | `FPL_MIN_REQUEST_INTERVAL_MS` | `3000` | Minimum milliseconds between outbound FPL requests |
+| `ASSETS_DIR` | `./apps/api/data/assets` | Directory where downloaded/generated player and team JPEG files are stored |
 | `VITE_API_BASE_URL` | `http://localhost:4000/api` | API base URL used by the frontend at build time |
 
 The API reads `.env` automatically via [dotenv](https://github.com/motdotla/dotenv). The frontend reads `VITE_*` variables at build/dev time via Vite's built-in env handling.
@@ -166,8 +169,9 @@ This:
 1. Fetches bootstrap data from FPL (`/api/bootstrap-static/`) — all gameweeks, teams, positions, and player summaries
 2. Fetches all fixtures from FPL (`/api/fixtures/`)
 3. Upserts everything into the local database
-4. Fetches the detailed season history for every player individually (`/api/element-summary/{id}/`)
-5. Records progress so the run can be resumed if it fails
+4. Downloads team badges and player portraits into the local assets directory, generating placeholders when official portraits are unavailable
+5. Fetches the detailed season history for every player individually (`/api/element-summary/{id}/`)
+6. Records progress so the run can be resumed if it fails
 
 **How long does it take?** With the default 3-second rate limit, fetching all ~750 player summaries takes around 40 minutes. You can lower `FPL_MIN_REQUEST_INTERVAL_MS` (e.g., `1000`) to speed this up, but be conservative to avoid being throttled by FPL.
 
@@ -177,6 +181,7 @@ The sync prints verbose progress as it runs. You'll see output similar to this:
 [sync] Starting full sync
 [sync] Fetching bootstrap data...
 [sync] Bootstrap fetched. 750 players, 20 teams, 38 gameweeks.
+[sync] Assets synced. 742 player images downloaded, 78 player placeholders generated, 20 team images downloaded.
 [sync] Fetching fixtures...
 [sync] Fixtures fetched. 380 fixtures upserted.
 [sync] 750 player summaries pending.
@@ -206,13 +211,15 @@ npm run sync -- --gameweek 29
 
 This still refreshes bootstrap data and fixtures, but only fetches player summaries for players whose teams are involved in gameweek 29's fixtures. Useful for weekly updates — instead of re-fetching all 750 players, you only fetch the ~50 players whose clubs played in that gameweek.
 
+Gameweek syncs also run the asset sync step first, so if a new player is added to the game, their local image file (or fallback placeholder) is created during that refresh without waiting for a later full sync.
+
 ### Resume behavior
 
 The sync pipeline is designed to be safe to rerun at any time:
 
 - If a sync run fails halfway through (network error, process killed, power cut), rerunning the same command automatically resumes from the first unfinished player. No need to start over.
 - If nothing has changed upstream (same data fingerprint), rerunning is a no-op.
-- Use `--force` to bypass the no-op check and re-fetch everything regardless. This is useful if you suspect the FPL API corrected some historical data and you want to ensure your local copy is fully up to date, even if the fingerprint hasn't changed.
+- Use `--force` to bypass the no-op check and re-fetch everything regardless. This also forces player/team images to be re-downloaded, even when the stored image source key is unchanged. This is useful if you suspect the FPL API corrected some historical data or updated image files in place and you want to ensure your local copy is fully up to date.
 
 Progress is tracked per-player in the `player_sync_status` and `gameweek_player_sync_status` database tables using SHA-256 snapshots of the upstream data.
 
@@ -248,6 +255,7 @@ fpl-app/
 │   │   │   │   └── createApiRouter.ts  # All six Express route handlers
 │   │   │   └── services/
 │   │   │       ├── queryService.ts   # Read-only database queries used by the API routes
+│   │   │       ├── assetSyncService.ts # Downloads/generates local JPEG files for players and teams
 │   │   │       └── syncService.ts    # Orchestrates full and gameweek sync runs
 │   │   ├── test/
 │   │   │   ├── app.test.ts           # HTTP integration tests for all API routes
@@ -255,6 +263,7 @@ fpl-app/
 │   │   │   ├── rateLimiter.test.ts   # Unit tests for rate limiter timing and queuing
 │   │   │   └── fixtures.ts           # Shared mock data (FPL API response shapes)
 │   │   ├── data/
+│   │   │   ├── assets/               # Local JPEG cache served by the API at /assets/*
 │   │   │   └── fpl.sqlite            # SQLite database file — created automatically on first sync
 │   │   ├── package.json
 │   │   ├── tsconfig.json

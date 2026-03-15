@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { OverviewResponse, PlayerCard, PlayerDetail } from "@fpl/contracts";
-import { getOverview, getPlayer, getPlayers } from "./api/client";
+import { getOverview, getPlayer, getPlayers, resolveAssetUrl } from "./api/client";
 import { StatPill } from "./components/StatPill";
 import { formatCost, formatPercent } from "./lib/format";
 import "./styles/global.css";
@@ -79,7 +79,16 @@ export default function App() {
           <section className="panel overview-grid">
             {overview.data.topPlayers.map((player) => (
               <article className="player-highlight" key={player.id}>
-                <span>{player.teamShortName}</span>
+                <div className="player-highlight-header">
+                  <span>{player.teamShortName}</span>
+                  {player.imagePath ? (
+                    <img
+                      alt={`${player.webName} portrait`}
+                      className="player-image"
+                      src={resolveAssetUrl(player.imagePath) ?? undefined}
+                    />
+                  ) : null}
+                </div>
                 <h2>{player.webName}</h2>
                 <div className="pill-row">
                   <StatPill label="Points" value={player.totalPoints} />
@@ -106,6 +115,18 @@ export default function App() {
                 {overview.data.fixtures.map((fixture) => (
                   <article className="fixture-card" key={fixture.id}>
                     <div>
+                      {overview.data.teams.find((team) => team.id === fixture.teamH)?.imagePath ? (
+                        <img
+                          alt={`${fixture.teamHName} badge`}
+                          className="team-badge"
+                          src={
+                            resolveAssetUrl(
+                              overview.data.teams.find((team) => team.id === fixture.teamH)
+                                ?.imagePath ?? null,
+                            ) ?? undefined
+                          }
+                        />
+                      ) : null}
                       <strong>{fixture.teamHShortName}</strong>
                       <span>{fixture.teamHName}</span>
                     </div>
@@ -113,6 +134,18 @@ export default function App() {
                       {fixture.teamHScore ?? "-"} : {fixture.teamAScore ?? "-"}
                     </div>
                     <div>
+                      {overview.data.teams.find((team) => team.id === fixture.teamA)?.imagePath ? (
+                        <img
+                          alt={`${fixture.teamAName} badge`}
+                          className="team-badge"
+                          src={
+                            resolveAssetUrl(
+                              overview.data.teams.find((team) => team.id === fixture.teamA)
+                                ?.imagePath ?? null,
+                            ) ?? undefined
+                          }
+                        />
+                      ) : null}
                       <strong>{fixture.teamAShortName}</strong>
                       <span>{fixture.teamAName}</span>
                     </div>
@@ -150,7 +183,16 @@ export default function App() {
                       type="button"
                     >
                       <div className="player-card-header">
-                        <h3>{player.webName}</h3>
+                        <div className="player-card-title">
+                          {player.imagePath ? (
+                            <img
+                              alt={`${player.webName} portrait`}
+                              className="player-image player-image-small"
+                              src={resolveAssetUrl(player.imagePath) ?? undefined}
+                            />
+                          ) : null}
+                          <h3>{player.webName}</h3>
+                        </div>
                         <span>{player.teamShortName}</span>
                       </div>
                       <p>{player.positionName}</p>
@@ -171,7 +213,16 @@ export default function App() {
               <div className="section-header">
                 <div>
                   <p className="eyebrow">Selected player</p>
-                  <h2>{selectedPlayer.data.player.firstName} {selectedPlayer.data.player.secondName}</h2>
+                  <div className="detail-player-header">
+                    {selectedPlayer.data.player.imagePath ? (
+                      <img
+                        alt={`${selectedPlayer.data.player.webName} portrait`}
+                        className="player-image"
+                        src={resolveAssetUrl(selectedPlayer.data.player.imagePath) ?? undefined}
+                      />
+                    ) : null}
+                    <h2>{selectedPlayer.data.player.firstName} {selectedPlayer.data.player.secondName}</h2>
+                  </div>
                 </div>
               </div>
               <div className="detail-grid">

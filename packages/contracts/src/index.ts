@@ -13,6 +13,7 @@ export type TeamSummary = {
   name: string;
   shortName: string;
   strength: number;
+  imagePath: string | null;
 };
 
 export type PlayerCard = {
@@ -23,6 +24,7 @@ export type PlayerCard = {
   teamId: number;
   teamName: string;
   teamShortName: string;
+  imagePath: string | null;
   positionId: number;
   positionName: string;
   nowCost: number;
