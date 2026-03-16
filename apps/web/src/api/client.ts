@@ -1,4 +1,4 @@
-import type { OverviewResponse, PlayerCard, PlayerDetail, FixtureCard } from "@fpl/contracts";
+import type { OverviewResponse, PlayerCard, PlayerDetail, FixtureCard, TeamSummary } from "@fpl/contracts";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
 const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
@@ -32,6 +32,10 @@ export function getPlayers(params?: {
 
 export function getPlayer(playerId: number) {
   return request<PlayerDetail>(`/players/${playerId}`);
+}
+
+export function getTeams() {
+  return request<TeamSummary[]>("/teams");
 }
 
 export function getFixtures(params?: { event?: number; team?: number }) {

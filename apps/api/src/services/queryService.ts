@@ -141,8 +141,7 @@ export class QueryService {
          JOIN teams t ON t.id = p.team_id
          JOIN positions pos ON pos.id = p.position_id
          ${where}
-         ORDER BY ${orderBy}, p.web_name ASC
-         LIMIT 100`,
+         ORDER BY ${orderBy}, p.web_name ASC`,
       )
       .all(params) as PlayerCard[];
   }

@@ -18,6 +18,10 @@ export function createApiRouter(db: AppDatabase) {
     res.json(queryService.getGameweeks());
   });
 
+  router.get("/teams", (_req, res) => {
+    res.json(queryService.getTeams());
+  });
+
   router.get("/fixtures", (req, res) => {
     const event = req.query.event ? Number(req.query.event) : undefined;
     const team = req.query.team ? Number(req.query.team) : undefined;
