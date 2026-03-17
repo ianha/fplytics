@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import type { AppDatabase } from "../db/database.js";
+import { annotateSchema, type SchemaTable } from "../chat/schemaContext.js";
 
 /** Only SELECT and WITH (CTEs) are permitted — checked before hitting the DB. */
 function isSafeQuery(sql: string): boolean {
@@ -58,10 +59,10 @@ function buildMcpServer(db: AppDatabase) {
           defaultValue: c.dflt_value,
           primaryKey: c.pk > 0,
         })),
-      }));
+      })) satisfies SchemaTable[];
 
       return {
-        contents: [{ uri: "schema://fpl-database", mimeType: "application/json", text: JSON.stringify(schema, null, 2) }],
+        contents: [{ uri: "schema://fpl-database", mimeType: "application/json", text: JSON.stringify(annotateSchema(schema), null, 2) }],
       };
     },
   );

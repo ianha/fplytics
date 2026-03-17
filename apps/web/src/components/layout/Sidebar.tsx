@@ -7,6 +7,7 @@ import {
   Menu,
   TrendingUp,
   Shield,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -16,6 +17,7 @@ const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/players", label: "Players", icon: Users },
   { to: "/fixtures", label: "Fixtures", icon: Calendar },
+  { to: "/chat", label: "AI Chat", icon: MessageSquare },
 ] as const;
 
 function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {

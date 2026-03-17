@@ -5,6 +5,7 @@ import { PlayersPage } from "@/pages/PlayersPage";
 import { PlayerDetailPage } from "@/pages/PlayerDetailPage";
 import { FixturesPage } from "@/pages/FixturesPage";
 import { TeamDetailPage } from "@/pages/TeamDetailPage";
+import { ChatPage } from "@/pages/ChatPage";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/players/:id" element={<PlayerDetailPage />} />
           <Route path="/fixtures" element={<FixturesPage />} />
           <Route path="/teams/:id" element={<TeamDetailPage />} />
+          <Route path="/chat" element={<ChatPage />} />
         </Routes>
       </main>
     </div>

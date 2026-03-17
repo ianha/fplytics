@@ -1,0 +1,3 @@
+# LLM provider API keys and OAuth tokens — never commit these
+data/llm-providers.json
+data/llm-tokens.json
