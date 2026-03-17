@@ -47,11 +47,13 @@ type ColDef = {
   format?: (v: any, player: PlayerCard) => React.ReactNode;
   group?: string;
   compute?: (player: PlayerCard) => number;
+  /** Values can be negative; format renders green (≥0) or red (<0) */
+  signed?: boolean;
 };
 
 const COLUMNS: ColDef[] = [
   { key: "nowCost",           label: "Price",  align: "right", sortable: true, format: (v) => formatCost(v) },
-  { key: "totalPoints",       label: "Pts",    title: "Total Points",   align: "right", sortable: true, format: (v) => <span className="text-accent font-bold">{v}</span> },
+  { key: "totalPoints",       label: "Pts",    title: "Total Points",   align: "right", sortable: true, format: (v) => <span className="font-bold">{v}</span> },
   { key: "pointsPerGame",     label: "PPG",    title: "Points Per Game", align: "right", sortable: true, format: (v) => Number(v).toFixed(1) },
   { key: "form",              label: "Form",   align: "right", sortable: true, format: (v) => Number(v).toFixed(1) },
   { key: "selectedByPercent", label: "Sel%",   title: "Selected By %",  align: "right", sortable: true, format: (v) => formatPercent(Number(v)) },
@@ -63,15 +65,15 @@ const COLUMNS: ColDef[] = [
   // Goals group
   { key: "goalsScored",              label: "G",   title: "Goals",                    align: "right", sortable: true, group: "Goals" },
   { key: "expectedGoals",            label: "xG",  title: "Expected Goals",           align: "right", sortable: true, format: (v) => Number(v).toFixed(2), group: "Goals" },
-  { key: "expectedGoalPerformance",  label: "xGP", title: "Expected Goal Performance",align: "right", sortable: true, format: (v) => Number(v).toFixed(2), group: "Goals" },
+  { key: "expectedGoalPerformance",  label: "xGP", title: "Expected Goal Performance",align: "right", sortable: true, signed: true, format: (v) => { const n = Number(v); return <span style={{ color: n < 0 ? "hsl(0,72%,51%)" : "hsl(160,100%,50%)" }}>{n.toFixed(2)}</span>; }, group: "Goals" },
   // Assists group
   { key: "assists",                   label: "A",   title: "Assists",                    align: "right", sortable: true, group: "Assists" },
   { key: "expectedAssists",           label: "xA",  title: "Expected Assists",           align: "right", sortable: true, format: (v) => Number(v).toFixed(2), group: "Assists" },
-  { key: "expectedAssistPerformance", label: "xAP", title: "Expected Assist Performance",align: "right", sortable: true, format: (v) => Number(v).toFixed(2), group: "Assists" },
+  { key: "expectedAssistPerformance", label: "xAP", title: "Expected Assist Performance",align: "right", sortable: true, signed: true, format: (v) => { const n = Number(v); return <span style={{ color: n < 0 ? "hsl(0,72%,51%)" : "hsl(160,100%,50%)" }}>{n.toFixed(2)}</span>; }, group: "Assists" },
   // GI group
   { key: "gi",                                  label: "GI",   title: "Goal Involvements (G+A)",            align: "right", sortable: true, compute: (p) => p.goalsScored + p.assists, group: "GI" },
-  { key: "expectedGoalInvolvements",            label: "xGI",  title: "Expected Goal Involvements",         align: "right", sortable: true, format: (v) => <span className="text-primary">{Number(v).toFixed(2)}</span>, group: "GI" },
-  { key: "expectedGoalInvolvementPerformance",  label: "xGIP", title: "Expected Goal Involvement Performance", align: "right", sortable: true, format: (v) => Number(v).toFixed(2), group: "GI" },
+  { key: "expectedGoalInvolvements",            label: "xGI",  title: "Expected Goal Involvements",         align: "right", sortable: true, format: (v) => Number(v).toFixed(2), group: "GI" },
+  { key: "expectedGoalInvolvementPerformance",  label: "xGIP", title: "Expected Goal Involvement Performance", align: "right", sortable: true, signed: true, format: (v) => { const n = Number(v); return <span style={{ color: n < 0 ? "hsl(0,72%,51%)" : "hsl(160,100%,50%)" }}>{n.toFixed(2)}</span>; }, group: "GI" },
 ];
 
 // Track which keys are the first column in their group (for left-border separator)
@@ -116,10 +118,10 @@ function ColHeader({
       onClick={() => col.sortable !== false && onSort(col.key)}
       title={col.title ?? col.label}
       className={cn(
-        "px-3 text-[10px] uppercase tracking-wider font-medium whitespace-nowrap select-none",
+        "px-3 text-[10px] uppercase tracking-wider whitespace-nowrap select-none",
         col.align === "right" ? "text-right" : "text-left",
         col.sortable !== false ? "cursor-pointer hover:text-white transition-colors" : "",
-        sortCol === col.key ? "text-white" : "text-muted-foreground",
+        sortCol === col.key ? "font-bold text-white" : "font-medium text-muted-foreground",
         className,
       )}
     >
@@ -412,10 +414,11 @@ export function PlayersPage() {
                         return (
                           <td
                             key={col.key}
+                            style={sortCol === col.key ? { color: "hsl(160,100%,50%)" } : undefined}
                             className={cn(
                               "px-3 py-2 text-xs tabular-nums whitespace-nowrap",
                               col.align === "right" ? "text-right" : "text-left",
-                              sortCol === col.key ? "bg-primary/5" : "",
+                              sortCol === col.key ? "bg-[hsl(342,100%,46%,0.05)]" : "",
                               GROUP_STARTS.has(col.key) && "border-l border-white/8",
                             )}
                           >
