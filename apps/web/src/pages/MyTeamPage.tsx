@@ -1,27 +1,21 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion, MotionConfig, useMotionValue, useMotionTemplate, animate } from "framer-motion";
-import { ArrowRightLeft, Coins, Crown, RefreshCcw, Shield, ShieldAlert, Sparkles, Trophy, Wand2, Zap } from "lucide-react";
-import type { MyTeamGameweekPicksResponse, MyTeamPageResponse, MyTeamPick, PlayerCard } from "@fpl/contracts";
-import { getMyTeam, getMyTeamGameweekPicks, getPlayers, linkMyTeamAccount, resolveAssetUrl, syncMyTeam } from "@/api/client";
+import { ArrowRightLeft, Coins, Crown, ShieldAlert, Sparkles, Trophy, Zap } from "lucide-react";
+import type { MyTeamGameweekPicksResponse, MyTeamPageResponse, MyTeamPick } from "@fpl/contracts";
+import { getMyTeam, getMyTeamGameweekPicks, linkMyTeamAccount, resolveAssetUrl, syncMyTeam } from "@/api/client";
 import { BGPattern, GlowCard } from "@/components/ui/glow-card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatCost } from "@/lib/format";
-import {
-  evaluatePlanner,
-  getAvailableCandidates,
-  replaceSquadPlayer,
-  type PlannerChip,
-  type SquadEntry,
-} from "@/lib/my-team";
+import { type SquadEntry } from "@/lib/my-team";
 
 type AsyncState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; payload: MyTeamPageResponse; allPlayers: PlayerCard[] };
+  | { status: "ready"; payload: MyTeamPageResponse };
 
 const POSITION_CONFIG: Record<number, { label: string; color: string }> = {
   1: { label: "GKP", color: "bg-yellow-500/20 text-yellow-300" },
@@ -29,14 +23,6 @@ const POSITION_CONFIG: Record<number, { label: string; color: string }> = {
   3: { label: "MID", color: "bg-green-500/20 text-green-300" },
   4: { label: "FWD", color: "bg-pink-500/20 text-pink-300" },
 };
-
-const CHIPS: Array<{ id: PlannerChip; label: string }> = [
-  { id: "none", label: "No chip" },
-  { id: "wildcard", label: "Wildcard" },
-  { id: "free-hit", label: "Free Hit" },
-  { id: "bench-boost", label: "Bench Boost" },
-  { id: "triple-captain", label: "Triple Captain" },
-];
 
 function summarizeAuthError(error: string | null) {
   if (!error) {
@@ -71,19 +57,22 @@ function toSquadEntry(pick: MyTeamPick): SquadEntry {
 
 // Module-level cache — persists across page navigations within the same tab session
 type MyTeamCache = {
-  state: { status: "ready"; payload: MyTeamPageResponse; allPlayers: PlayerCard[] };
+  state: { status: "ready"; payload: MyTeamPageResponse };
   selectedAccountId: number | null;
   email: string;
   entryIdInput: string;
-  selectedGameweek: string;
-  selectedChip: PlannerChip;
   viewGameweek: number | null;
   historicalData: MyTeamGameweekPicksResponse | null;
-  workingSquad: SquadEntry[];
 };
 const _myTeamCache = new Map<string, MyTeamCache>();
 const _myTeamHistoricalCache = new Map<string, MyTeamGameweekPicksResponse>();
 let _myTeamSavedParams = "";
+
+export function resetMyTeamPageCacheForTests() {
+  _myTeamCache.clear();
+  _myTeamHistoricalCache.clear();
+  _myTeamSavedParams = "";
+}
 
 function getSavedParam(key: string): string {
   if (!_myTeamSavedParams) return "";
@@ -104,64 +93,17 @@ function getHistoricalCacheKey(accountId: number, gameweek: number): string {
   return `${accountId}|${gameweek}`;
 }
 
-function StatCard({
-  label,
-  value,
-  accent = "text-white",
-  icon,
-  trend,
-}: {
-  label: string;
-  value: string | number;
-  accent?: string;
-  icon?: ReactNode;
-  trend?: string;
-}) {
-  return (
-    <div
-      className="rounded-xl border border-white/10 bg-white/6 p-4 backdrop-blur-xl"
-      role="group"
-      aria-label={`${label}: ${value}`}
-    >
-      <div className="mb-2 flex items-center gap-1.5 text-purple-300">
-        {icon}
-        <span className="text-[10px] uppercase tracking-wider">{label}</span>
-      </div>
-      <div className={cn("font-display text-2xl font-bold", accent)}>{value}</div>
-      {trend && <div className="mt-0.5 text-[11px] text-accent">{trend}</div>}
-    </div>
-  );
-}
-
-function PitchPlayerCard({
-  entry,
-  onSelect,
-  isSelected,
-  gwPoints,
-  isReadOnly = false,
-}: {
-  entry: SquadEntry;
-  onSelect: (entry: SquadEntry) => void;
-  isSelected: boolean;
-  gwPoints?: number;
-  isReadOnly?: boolean;
-}) {
+function PitchPlayerCard({ entry, gwPoints }: { entry: SquadEntry; gwPoints?: number }) {
   const image = resolveAssetUrl(entry.player.imagePath);
 
   return (
-    <button
-      type="button"
-      onClick={isReadOnly ? undefined : () => onSelect(entry)}
-      aria-label={isReadOnly ? entry.player.webName : `Replace ${entry.player.webName}`}
-      disabled={isReadOnly}
+    <div
+      role="group"
+      aria-label={entry.player.webName}
       className={cn(
         "group flex w-full flex-col items-center rounded-2xl border p-3 text-center transition-all duration-200",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        isReadOnly
-          ? "cursor-default border-white/10 bg-[rgba(17,6,39,0.7)]"
-          : isSelected
-            ? "border-primary/70 bg-primary/12 shadow-[0_0_30px_rgba(233,0,82,0.2)]"
-            : "border-white/10 bg-[rgba(17,6,39,0.7)] hover:border-white/20 hover:bg-white/8",
+        "cursor-default border-white/10 bg-[rgba(17,6,39,0.7)]",
       )}
     >
       <div className="relative mb-2">
@@ -211,20 +153,79 @@ function PitchPlayerCard({
         </div>
       )}
 
-      {!isReadOnly && (
-        <div className="mt-1.5 flex justify-center opacity-0 transition-opacity group-hover:opacity-50">
-          <ArrowRightLeft className="h-3 w-3 text-white" />
-        </div>
-      )}
-    </button>
+    </div>
+  );
+}
+
+function MyTeamCredentialsForm({
+  email,
+  password,
+  entryIdInput,
+  submitting,
+  submitLabel,
+  labelClassName = "mb-2 block text-[11px] uppercase tracking-[0.18em] text-white/45",
+  inputClassName,
+  onEmailChange,
+  onPasswordChange,
+  onEntryIdChange,
+  onSubmit,
+}: {
+  email: string;
+  password: string;
+  entryIdInput: string;
+  submitting: boolean;
+  submitLabel: string;
+  labelClassName?: string;
+  inputClassName?: string;
+  onEmailChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onEntryIdChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="grid gap-4">
+      <div>
+        <label className={labelClassName}>Email</label>
+        <Input
+          aria-label="Email"
+          value={email}
+          onChange={(event) => onEmailChange(event.target.value)}
+          placeholder="you@example.com"
+          className={cn("min-h-11 border-white/10 bg-white/5", inputClassName)}
+        />
+      </div>
+      <div>
+        <label className={labelClassName}>Password</label>
+        <Input
+          aria-label="Password"
+          type="password"
+          value={password}
+          onChange={(event) => onPasswordChange(event.target.value)}
+          placeholder="FPL password"
+          className={cn("min-h-11 border-white/10 bg-white/5", inputClassName)}
+        />
+      </div>
+      <div>
+        <label className={labelClassName}>Entry ID (optional)</label>
+        <Input
+          aria-label="Entry ID (optional)"
+          inputMode="numeric"
+          value={entryIdInput}
+          onChange={(event) => onEntryIdChange(event.target.value.replace(/[^\d]/g, ""))}
+          placeholder="Current season team entry ID"
+          className={cn("min-h-11 border-white/10 bg-white/5", inputClassName)}
+        />
+      </div>
+      <Button type="button" disabled={submitting || !email || !password} onClick={onSubmit} className="min-h-11">
+        {submitting ? `${submitLabel}…` : submitLabel}
+      </Button>
+    </div>
   );
 }
 
 export function MyTeamPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialAccountId = parseNullableNumber(searchParams.get("accountId") ?? getSavedParam("accountId"));
-  const initialSelectedGameweek = searchParams.get("planGW") ?? getSavedParam("planGW");
-  const initialSelectedChip = (searchParams.get("chip") ?? getSavedParam("chip")) as PlannerChip | "";
   const initialViewGameweek = parseNullableNumber(searchParams.get("viewGW") ?? getSavedParam("viewGW"));
   const initialCache = _myTeamCache.get(getMyTeamCacheKey(initialAccountId));
   const [state, setState] = useState<AsyncState>(() =>
@@ -235,12 +236,6 @@ export function MyTeamPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
     () => initialAccountId ?? initialCache?.selectedAccountId ?? null,
   );
-  const [selectedGameweek, setSelectedGameweek] = useState(() => initialSelectedGameweek || initialCache?.selectedGameweek || "");
-  const [selectedChip, setSelectedChip] = useState<PlannerChip>(
-    () => (initialSelectedChip || initialCache?.selectedChip || "none") as PlannerChip,
-  );
-  const [workingSquad, setWorkingSquad] = useState<SquadEntry[]>(() => initialCache?.workingSquad ?? []);
-  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [email, setEmail] = useState(() => initialCache?.email ?? "");
   const [password, setPassword] = useState("");
   const [entryIdInput, setEntryIdInput] = useState(() => initialCache?.entryIdInput ?? "");
@@ -263,10 +258,6 @@ export function MyTeamPage() {
     setSelectedAccountId(cache.selectedAccountId);
     setEmail(cache.email);
     setEntryIdInput(cache.entryIdInput);
-    setSelectedGameweek(cache.selectedGameweek);
-    setSelectedChip(cache.selectedChip);
-    setWorkingSquad(cache.workingSquad);
-    setSelectedSlotId(null);
     setViewGameweek(cache.viewGameweek);
     setHistoricalData(cache.historicalData);
   }
@@ -313,8 +304,8 @@ export function MyTeamPage() {
     }
 
     try {
-      const [payload, allPlayers] = await Promise.all([getMyTeam(accountId), getPlayers()]);
-      const readyState = { status: "ready" as const, payload, allPlayers };
+      const payload = await getMyTeam(accountId);
+      const readyState = { status: "ready" as const, payload };
       setState(readyState);
       const resolvedAccountId = payload.selectedAccountId ?? payload.accounts[0]?.id ?? null;
       setSelectedAccountId(resolvedAccountId);
@@ -329,13 +320,6 @@ export function MyTeamPage() {
           "",
       );
       setEntryIdInput(resolvedEntryId);
-      const resolvedGameweek = selectedGameweek || String(payload.currentGameweek ?? 1);
-      setSelectedGameweek(resolvedGameweek);
-      const squad = payload.picks.map(toSquadEntry);
-      setWorkingSquad(squad);
-      setSelectedSlotId(null);
-      const resolvedChip = selectedChip || "none";
-      setSelectedChip(resolvedChip);
       const currentGw = payload.currentGameweek ?? null;
       const resolvedViewGameweek = viewGameweek ?? currentGw;
       setViewGameweek(resolvedViewGameweek);
@@ -352,11 +336,8 @@ export function MyTeamPage() {
         selectedAccountId: resolvedAccountId,
         email: resolvedEmail,
         entryIdInput: resolvedEntryId,
-        selectedGameweek: resolvedGameweek,
-        selectedChip: resolvedChip,
         viewGameweek: resolvedViewGameweek,
         historicalData: cachedHistorical,
-        workingSquad: squad,
       };
       _myTeamCache.set(cacheKey, cacheEntry);
       if (resolvedAccountId !== null) {
@@ -422,12 +403,10 @@ export function MyTeamPage() {
   useEffect(() => {
     const params = new URLSearchParams();
     if (selectedAccountId !== null) params.set("accountId", String(selectedAccountId));
-    if (selectedGameweek) params.set("planGW", selectedGameweek);
     if (viewGameweek !== null) params.set("viewGW", String(viewGameweek));
-    if (selectedChip !== "none") params.set("chip", selectedChip);
     _myTeamSavedParams = params.toString();
     setSearchParams(params, { replace: true });
-  }, [selectedAccountId, selectedGameweek, viewGameweek, selectedChip, setSearchParams]);
+  }, [selectedAccountId, viewGameweek, setSearchParams]);
 
   useEffect(() => {
     if (state.status !== "ready") return;
@@ -439,22 +418,16 @@ export function MyTeamPage() {
       selectedAccountId,
       email,
       entryIdInput,
-      selectedGameweek,
-      selectedChip,
       viewGameweek,
       historicalData,
-      workingSquad,
     });
   }, [
     state,
     selectedAccountId,
     email,
     entryIdInput,
-    selectedGameweek,
-    selectedChip,
     viewGameweek,
     historicalData,
-    workingSquad,
   ]);
 
   const payload = state.status === "ready" ? state.payload : null;
@@ -462,32 +435,8 @@ export function MyTeamPage() {
     payload?.accounts.find((account) => account.id === selectedAccountId) ??
     payload?.accounts[0] ??
     null;
-  const sourceSquad = payload?.picks.map(toSquadEntry) ?? [];
   const needsRelogin = selectedAccount?.authStatus === "relogin_required";
   const relinkMessage = summarizeAuthError(selectedAccount?.authError ?? null);
-  const selectedSlot = useMemo(
-    () => workingSquad.find((entry) => entry.slotId === selectedSlotId) ?? null,
-    [selectedSlotId, workingSquad],
-  );
-
-  const evaluation = useMemo(() => {
-    if (!payload) return null;
-    return evaluatePlanner(
-      sourceSquad,
-      workingSquad,
-      payload.bank,
-      payload.freeTransfers,
-      payload.currentGameweek ?? 1,
-      Number(selectedGameweek || payload.currentGameweek || 1),
-      selectedChip,
-    );
-  }, [payload, selectedChip, selectedGameweek, sourceSquad, workingSquad]);
-
-  const candidates = useMemo(() => {
-    if (state.status !== "ready") return [];
-    return getAvailableCandidates(state.allPlayers, workingSquad, selectedSlot);
-  }, [selectedSlot, state, workingSquad]);
-
 
   if (state.status === "loading") {
     return (
@@ -523,51 +472,24 @@ export function MyTeamPage() {
               </span>
             </div>
             <h1 className="mt-4 font-display text-4xl font-bold bg-gradient-to-r from-white via-purple-200 to-pink-200 bg-clip-text text-transparent">
-              Link your FPL account
+              Link your real FPL account
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-white/65">
               Enter the same FPL email and password you use on the official website. If FPL blocks automatic entry detection, add your current season entry ID too.
             </p>
 
-            <div className="mt-6 grid gap-4">
-              <div>
-                <label className="mb-2 block text-[11px] uppercase tracking-[0.18em] text-white/45">Email</label>
-                <Input
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@example.com"
-                  className="min-h-11 border-white/10 bg-white/5"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-[11px] uppercase tracking-[0.18em] text-white/45">Password</label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="FPL password"
-                  className="min-h-11 border-white/10 bg-white/5"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-[11px] uppercase tracking-[0.18em] text-white/45">Entry ID (optional)</label>
-                <Input
-                  aria-label="Entry ID (optional)"
-                  inputMode="numeric"
-                  value={entryIdInput}
-                  onChange={(event) => setEntryIdInput(event.target.value.replace(/[^\d]/g, ""))}
-                  placeholder="Current season team entry ID"
-                  className="min-h-11 border-white/10 bg-white/5"
-                />
-              </div>
-              <Button
-                type="button"
-                disabled={submitting || !email || !password}
-                onClick={() => submitAccountCredentials(email, password, entryIdInput)}
-                className="min-h-11"
-              >
-                {submitting ? "Linking account…" : "Link and sync account"}
-              </Button>
+            <div className="mt-6">
+              <MyTeamCredentialsForm
+                email={email}
+                password={password}
+                entryIdInput={entryIdInput}
+                submitting={submitting}
+                submitLabel="Link and sync account"
+                onEmailChange={setEmail}
+                onPasswordChange={setPassword}
+                onEntryIdChange={setEntryIdInput}
+                onSubmit={() => submitAccountCredentials(email, password, entryIdInput)}
+              />
             </div>
           </GlowCard>
         </div>
@@ -670,24 +592,20 @@ export function MyTeamPage() {
                     </p>
                   </div>
                 </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-2 block text-[11px] uppercase tracking-[0.18em] text-amber-100/75">Email</label>
-                    <Input value={email} onChange={(e) => setEmail(e.target.value)} className="min-h-11 border-amber-200/20 bg-black/20" />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-[11px] uppercase tracking-[0.18em] text-amber-100/75">Password</label>
-                    <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Re-enter FPL password" className="min-h-11 border-amber-200/20 bg-black/20" />
-                  </div>
-                  <div>
-                    <label className="mb-2 block text-[11px] uppercase tracking-[0.18em] text-amber-100/75">Entry ID (optional)</label>
-                    <Input aria-label="Entry ID (optional)" inputMode="numeric" value={entryIdInput} onChange={(e) => setEntryIdInput(e.target.value.replace(/[^\d]/g, ""))} placeholder="Current season team entry ID" className="min-h-11 border-amber-200/20 bg-black/20" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <Button type="button" className="min-h-11 w-full md:w-auto" disabled={submitting || !email || !password} onClick={() => submitAccountCredentials(email, password, entryIdInput)}>
-                      {submitting ? "Relinking…" : "Relink and sync"}
-                    </Button>
-                  </div>
+                <div className="mt-4">
+                  <MyTeamCredentialsForm
+                    email={email}
+                    password={password}
+                    entryIdInput={entryIdInput}
+                    submitting={submitting}
+                    submitLabel="Relink and sync"
+                    labelClassName="mb-2 block text-[11px] uppercase tracking-[0.18em] text-amber-100/75"
+                    inputClassName="border-amber-200/20 bg-black/20"
+                    onEmailChange={setEmail}
+                    onPasswordChange={setPassword}
+                    onEntryIdChange={setEntryIdInput}
+                    onSubmit={() => submitAccountCredentials(email, password, entryIdInput)}
+                  />
                 </div>
               </div>
             )}
@@ -706,7 +624,7 @@ export function MyTeamPage() {
                   <h2 className="font-display text-xl font-bold">Pitch View</h2>
                   <p className="mt-0.5 text-sm text-white/50">
                     {viewGameweek === payload.currentGameweek
-                      ? "Tap any player to see swap options."
+                      ? "Your latest synced squad."
                       : historicalLoading
                         ? "Loading…"
                         : historicalData
@@ -745,7 +663,7 @@ export function MyTeamPage() {
                 const isHistorical = viewGameweek !== payload.currentGameweek;
                 const displayPicks = isHistorical
                   ? historicalData?.picks.map(toSquadEntry) ?? []
-                  : workingSquad;
+                  : payload.picks.map(toSquadEntry);
                 const gwPointsMap = Object.fromEntries(
                   (historicalData?.picks ?? []).map((p) => [p.slotId, p.gwPoints ?? 0]),
                 );
@@ -778,10 +696,7 @@ export function MyTeamPage() {
                                 <PitchPlayerCard
                                   key={entry.slotId}
                                   entry={entry}
-                                  onSelect={(nextEntry) => setSelectedSlotId(nextEntry.slotId)}
-                                  isSelected={selectedSlotId === entry.slotId}
                                   gwPoints={gwPointsMap[entry.slotId]}
-                                  isReadOnly={isHistorical}
                                 />
                               ))}
                             </div>
@@ -795,10 +710,7 @@ export function MyTeamPage() {
                               <PitchPlayerCard
                                 key={entry.slotId}
                                 entry={entry}
-                                onSelect={(nextEntry) => setSelectedSlotId(nextEntry.slotId)}
-                                isSelected={selectedSlotId === entry.slotId}
                                 gwPoints={isHistorical ? gwPointsMap[entry.slotId] : undefined}
-                                isReadOnly={isHistorical}
                               />
                             ))}
                           </div>
@@ -818,13 +730,9 @@ export function MyTeamPage() {
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-display text-xl font-bold">Transfer Planner</h2>
-                  <p className="mt-0.5 text-sm text-white/50">Test moves locally before committing on the official site.</p>
+                  <p className="mt-0.5 text-sm text-white/50">Sync controls stay here while the local planner workspace is being rebuilt.</p>
                 </div>
                 <div className="flex shrink-0 gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setWorkingSquad(sourceSquad)}>
-                    <RefreshCcw className="h-3.5 w-3.5" />
-                    Reset
-                  </Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -845,8 +753,9 @@ export function MyTeamPage() {
                 </div>
               </div>
 
-              {/* Placeholder */}
-              <p className="text-sm text-white/30 italic">Transfer planner body coming soon.</p>
+              <div className="rounded-2xl border border-dashed border-white/10 bg-white/4 p-4 text-sm leading-6 text-white/55">
+                Planner actions are temporarily unavailable in the UI while the shared My Team shell is being simplified. Use the synced pitch, gameweek history, and transfer log here, then make final moves on the official FPL site.
+              </div>
             </GlowCard>
           </motion.div>
         </div>
@@ -945,7 +854,7 @@ export function MyTeamPage() {
             <GlowCard className="p-5 sm:p-6">
               <div className="mb-1 flex items-center gap-2">
                 <Coins className="h-4 w-4 text-accent" />
-                <h2 className="font-display text-lg font-bold">Seasons</h2>
+                <h2 className="font-display text-lg font-bold">Season Archive</h2>
               </div>
               <p className="mb-4 text-xs text-white/45">Historical season summaries.</p>
               <div className="overflow-x-auto rounded-xl border border-white/6">

@@ -15,7 +15,7 @@ A TypeScript monorepo that mirrors the public experience of [fantasy.premierleag
 - **Express HTTP API serving player, fixture, gameweek, and team data.** A thin read-only API layer sits on top of the database, exposing structured JSON endpoints that the frontend (and any external tool) can consume.
 
 - **Multi-page React frontend with premium FPL-inspired design.** A dark-themed, glassmorphism UI across five pages: a dashboard, full player browser with search and filters, per-player stat detail with charts, a fixtures browser with gameweek navigation, and a team detail page. Built with Tailwind CSS, shadcn/ui components, framer-motion animations, and Recharts for data visualisation.
-- **My Team sync, account linking, and scratchpad planner in the same house style.** A dedicated `My Team` page extends the current UI language with a pitch view, linked FPL account support, transfer history, season archive, recent gameweek summaries, and a local-only mock transfer planner for experimenting with legal swaps and chip simulation without touching the real FPL site.
+- **My Team sync, account linking, and history tooling in the same house style.** A dedicated `My Team` page extends the current UI language with a pitch view, linked FPL account support, transfer history, season archive, recent gameweek summaries, and a planner shell that keeps sync controls in place while local-only planning actions are rebuilt.
 
 - **Local JPEG asset library for players and teams.** Sync runs download official player portraits and club badges into `apps/api/data/assets`, save their local paths in SQLite, and serve them from the API under `/assets/...`. If FPL has not published a portrait yet, the sync generates a local placeholder JPEG instead of failing.
 
@@ -206,9 +206,9 @@ Use this checklist when reviewing the `My Team` page after UI changes:
 
 - Shell consistency: the page should use the same sidebar, spacing rhythm, typography, and glass-card treatment as the dashboard and players pages.
 - Pitch responsiveness: no horizontal overflow on mobile; player cards remain tap-friendly and readable.
-- Planner clarity: mock transfers must feel clearly local-only, with obvious reset behavior and visible planner warnings.
+- Planner shell clarity: the disabled planner state should read intentionally incomplete rather than broken, and the sync action should remain obvious.
 - Accessibility: focus rings stay visible, contrast remains readable on dark surfaces, and key controls have descriptive labels.
-- Touch targets: manager switching, planner controls, and chip selectors should remain comfortable on mobile.
+- Touch targets: manager switching, sync controls, and relink inputs should remain comfortable on mobile.
 
 ---
 

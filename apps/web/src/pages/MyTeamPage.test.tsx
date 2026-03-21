@@ -1,8 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MyTeamPage } from "./MyTeamPage";
+import { MyTeamPage, resetMyTeamPageCacheForTests } from "./MyTeamPage";
 
 function makePlayer(id: number, positionId: number, teamId: number, totalPoints: number) {
   return {
@@ -146,19 +145,19 @@ function buildPayload() {
 
 const {
   getMyTeamMock,
-  getPlayersMock,
+  getMyTeamGameweekPicksMock,
   linkMyTeamAccountMock,
   syncMyTeamMock,
 } = vi.hoisted(() => ({
   getMyTeamMock: vi.fn(),
-  getPlayersMock: vi.fn(),
+  getMyTeamGameweekPicksMock: vi.fn(),
   linkMyTeamAccountMock: vi.fn(),
   syncMyTeamMock: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => ({
   getMyTeam: getMyTeamMock,
-  getPlayers: getPlayersMock,
+  getMyTeamGameweekPicks: getMyTeamGameweekPicksMock,
   linkMyTeamAccount: linkMyTeamAccountMock,
   syncMyTeam: syncMyTeamMock,
   resolveAssetUrl: vi.fn(() => null),
@@ -166,8 +165,14 @@ vi.mock("@/api/client", () => ({
 
 describe("MyTeamPage", () => {
   beforeEach(() => {
+    resetMyTeamPageCacheForTests();
     getMyTeamMock.mockResolvedValue(buildPayload());
-    getPlayersMock.mockResolvedValue(mockPlayers);
+    getMyTeamGameweekPicksMock.mockImplementation(async (_accountId: number, gameweek: number) => ({
+      gameweek,
+      picks: buildPayload().picks.map((pick) => ({ ...pick, gwPoints: pick.position })),
+      totalPoints: gameweek === 6 ? 48 : 64,
+      pointsOnBench: gameweek === 6 ? 3 : 6,
+    }));
     linkMyTeamAccountMock.mockResolvedValue(buildPayload());
     syncMyTeamMock.mockResolvedValue(buildPayload());
   });
@@ -213,27 +218,19 @@ describe("MyTeamPage", () => {
     expect(screen.getByLabelText(/Entry ID \(optional\)/i)).toBeInTheDocument();
   });
 
-  it("supports scratchpad swaps and reset without committing anything", async () => {
-    const user = userEvent.setup();
+  it("loads historical picks when a different gameweek is selected", async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/my-team?accountId=1&viewGW=6"]}>
         <MyTeamPage />
       </MemoryRouter>,
     );
 
     await screen.findByRole("heading", { name: /Midnight Press FC/i });
 
-    await user.click(await screen.findByRole("button", { name: /Replace Player 30/i }));
-    const bringInButtons = await screen.findAllByRole("button", { name: /Bring in/i });
-    await user.click(bringInButtons[0]);
-
     await waitFor(() => {
-      expect(screen.getByRole("group", { name: /Planned transfers: 1/i })).toBeInTheDocument();
+      expect(getMyTeamGameweekPicksMock).toHaveBeenCalledWith(1, 6);
     });
-
-    await user.click(screen.getByRole("button", { name: /Reset/i }));
-
-    expect(await screen.findByRole("group", { name: /Planned transfers: 0/i })).toBeInTheDocument();
+    expect(await screen.findByText(/48 pts · 3 on bench/i, { selector: "p" })).toBeInTheDocument();
   });
 
   it("shows a relink banner and disables sync when the account needs re-authentication", async () => {
@@ -259,11 +256,12 @@ describe("MyTeamPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText(/needs to be relinked/i)).toBeInTheDocument();
+    expect(await screen.findByText(/needs to be relinked before the next sync/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue("ian@fpl.local")).toBeInTheDocument();
     expect(screen.getByText(/saved fpl password is no longer being accepted/i)).toBeInTheDocument();
     expect(screen.queryByText(/Resolver diagnostics:/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Relink required/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Relink and sync/i })).toBeInTheDocument();
+    expect(screen.getByText(/planner actions are temporarily unavailable/i)).toBeInTheDocument();
   });
 });

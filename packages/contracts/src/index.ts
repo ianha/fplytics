@@ -120,16 +120,20 @@ export type OverviewResponse = {
   teams: TeamSummary[];
 };
 
+export type MyTeamAuthStatus = "authenticated" | "relogin_required";
+
 export type MyTeamAccountSummary = {
   id: number;
   email: string;
   entryId: number | null;
   managerName: string;
   teamName: string;
-  authStatus: string;
+  authStatus: MyTeamAuthStatus;
   authError: string | null;
   lastAuthenticatedAt: string | null;
 };
+
+export type MyTeamPickRole = "starter" | "bench";
 
 export type MyTeamPick = {
   slotId: string;
@@ -140,7 +144,7 @@ export type MyTeamPick = {
   sellingPrice: number | null;
   purchasePrice: number | null;
   player: PlayerCard;
-  role: "starter" | "bench";
+  role: MyTeamPickRole;
   benchOrder: number | null;
   gwPoints?: number;
 };
