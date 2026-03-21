@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Search, Users, ChevronUp, ChevronDown, ChevronsUpDown, RefreshCw, RotateCcw } from "lucide-react";
+import { Search, Users, ChevronUp, ChevronDown, ChevronsUpDown, RefreshCw, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type AsyncState<T> =
@@ -22,6 +22,7 @@ type AsyncState<T> =
   | { status: "ready"; data: T };
 
 type SortDir = "asc" | "desc";
+const PLAYERS_PAGE_SIZE = 35;
 
 const _playersDataCache = new Map<string, PlayerCard[]>();
 let _savedParams = ""; // always up-to-date filter/sort URL string, even before first fetch completes
@@ -176,7 +177,10 @@ export function PlayersPage() {
   const [gameweeks, setGameweeks] = useState<GameweekSummary[]>(() => _gameweeksCache ?? []);
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [tableScrolled, setTableScrolled] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(PLAYERS_PAGE_SIZE);
   const handleTableScroll = useCallback(() => {
     setTableScrolled((tableContainerRef.current?.scrollLeft ?? 0) > 12);
   }, []);
@@ -312,6 +316,37 @@ export function PlayersPage() {
     () => new Map(teams.map((t) => [t.id, resolveAssetUrl(t.imagePath)])),
     [teams],
   );
+  const visiblePlayers = useMemo(
+    () => players.slice(0, visibleCount),
+    [players, visibleCount],
+  );
+
+  useEffect(() => {
+    setVisibleCount(PLAYERS_PAGE_SIZE);
+  }, [search, position, team, statusFilter, minPrice, maxPrice, minMinutes, fromGW, toGW, sortCol, sortDir, state.status]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || state.status !== "ready" || visibleCount >= players.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        setVisibleCount((count) => Math.min(count + PLAYERS_PAGE_SIZE, players.length));
+      },
+      { rootMargin: "240px 0px" },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visibleCount, players.length, state.status]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <div className="flex flex-col gap-5 p-6 lg:p-8 min-h-0">
@@ -326,7 +361,26 @@ export function PlayersPage() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-44 flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input placeholder="Search players…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-9" />
+          <Input
+            ref={searchInputRef}
+            placeholder="Search players…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className={cn("h-9 pl-9", search && "pr-9")}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                searchInputRef.current?.focus();
+              }}
+              aria-label="Clear player search"
+              className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         <Select value={position} onValueChange={setPosition}>
           <SelectTrigger className="w-36 h-9"><SelectValue placeholder="Position" /></SelectTrigger>
@@ -393,7 +447,7 @@ export function PlayersPage() {
       <div className="flex items-center justify-between -mt-1">
         {state.status === "ready" ? (
           <p className="text-xs text-muted-foreground">
-            {players.length} player{players.length !== 1 ? "s" : ""}
+            {visiblePlayers.length} of {players.length} player{players.length !== 1 ? "s" : ""}
             {search && ` matching "${search}"`}
           </p>
         ) : (
@@ -472,7 +526,7 @@ export function PlayersPage() {
                   </td>
                 </tr>
               ) : (
-                players.map((player, idx) => {
+                visiblePlayers.map((player, idx) => {
                   const img = resolveAssetUrl(player.imagePath);
                   const pos = POSITIONS[player.positionId];
                   const teamImg = teamImageMap.get(player.teamId);
@@ -581,6 +635,12 @@ export function PlayersPage() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {state.status === "ready" && players.length > visiblePlayers.length && (
+        <div ref={loadMoreRef} className="flex justify-center py-4">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary/60 border-t-transparent" />
         </div>
       )}
     </div>
