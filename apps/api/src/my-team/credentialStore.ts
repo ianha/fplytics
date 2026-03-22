@@ -10,7 +10,7 @@ function getKey() {
   if (!env.fplAuthSecret) {
     throw new Error("FPL_AUTH_SECRET is required to store FPL account credentials.");
   }
-  return scryptSync(env.fplAuthSecret, "fun-fpl-my-team", 32);
+  return scryptSync(env.fplAuthSecret, "fplytics-my-team", 32);
 }
 
 export function encryptCredentials(credentials: StoredCredentials) {

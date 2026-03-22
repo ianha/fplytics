@@ -34,10 +34,10 @@ function SidebarContent({ onItemClick }: { onItemClick?: () => void }) {
           </div>
           <div>
             <h1 className="font-display text-base font-bold text-white tracking-wide">
-              FPL Analytics
+              FPLytics
             </h1>
             <p className="text-[10px] text-white/50 uppercase tracking-widest">
-              Fantasy Premier League
+              Fantasy Premier League analytics
             </p>
           </div>
         </div>
@@ -106,7 +106,7 @@ export function Sidebar() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/70 shadow-md shadow-primary/40">
             <TrendingUp className="h-4 w-4 text-white" />
           </div>
-          <span className="font-display text-sm font-bold text-white">FPL Analytics</span>
+          <span className="font-display text-sm font-bold text-white">FPLytics</span>
         </div>
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>

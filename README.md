@@ -1,4 +1,4 @@
-# Fun FPL
+# FPLytics
 
 A TypeScript monorepo that mirrors the public experience of [fantasy.premierleague.com](https://fantasy.premierleague.com) using a local SQLite database, a Node.js/Express API, and a React frontend.
 
@@ -70,8 +70,8 @@ No database server is required. SQLite runs entirely as a file embedded in the p
 
 ```bash
 # 1. Clone and install dependencies
-git clone <repo-url> fpl-app
-cd fpl-app
+git clone <repo-url> fplytics
+cd fplytics
 npm install
 ```
 
@@ -298,7 +298,7 @@ Progress is tracked per-player in the `player_sync_status` and `gameweek_player_
 ## Folder structure
 
 ```text
-fpl-app/
+fplytics/
 ├── .env.example              # Environment variable template — copy to .env before running
 ├── .env                      # Your local config (created from .env.example, not committed)
 ├── package.json              # Root scripts and workspace definitions
