@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { motion, MotionConfig, useMotionValue, useMotionTemplate, animate } from "framer-motion";
-import { ArrowRightLeft, Coins, Crown, ExternalLink, ShieldAlert, Sparkles, Trophy, Zap } from "lucide-react";
+import { ArrowRightLeft, ChevronLeft, ChevronRight, Coins, Crown, ExternalLink, ShieldAlert, Sparkles, Trophy, Zap } from "lucide-react";
 import type { MyTeamGameweekPicksResponse, MyTeamPageResponse, MyTeamPick, PlayerDetail } from "@fpl/contracts";
 import { getMyTeam, getMyTeamGameweekPicks, getPlayer, linkMyTeamAccount, resolveAssetUrl, syncMyTeam } from "@/api/client";
 import { BGPattern, GlowCard } from "@/components/ui/glow-card";
@@ -684,13 +684,34 @@ export function MyTeamPage() {
                 )}
               </div>
 
-              {/* GW selector dropdown */}
-              <div className="mb-5">
+              {/* GW selector — prev/next buttons + dropdown */}
+              <div className="mb-5 inline-flex items-center gap-1.5">
+                {/* ← earlier gameweek (history is descending, so idx+1 = lower GW) */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 border border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-30"
+                  disabled={(() => {
+                    const idx = payload.history.findIndex((r) => r.gameweek === viewGameweek);
+                    return idx < 0 || idx >= payload.history.length - 1;
+                  })()}
+                  onClick={() => {
+                    const idx = payload.history.findIndex((r) => r.gameweek === viewGameweek);
+                    if (idx >= 0 && idx < payload.history.length - 1) {
+                      const earlier = payload.history[idx + 1].gameweek;
+                      selectViewGameweek(earlier, selectedAccount.id, payload.currentGameweek ?? 0);
+                    }
+                  }}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+
+                {/* dropdown — naturally sized to content */}
                 <Select
                   value={String(viewGameweek ?? "")}
                   onValueChange={(val) => selectViewGameweek(Number(val), selectedAccount.id, payload.currentGameweek ?? 0)}
                 >
-                  <SelectTrigger className="h-7 border-white/10 bg-white/5 px-2.5 text-xs">
+                  <SelectTrigger className="h-7 w-auto border-white/10 bg-white/5 px-2.5 text-xs">
                     <SelectValue placeholder="Select gameweek" />
                   </SelectTrigger>
                   <SelectContent>
@@ -701,6 +722,26 @@ export function MyTeamPage() {
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* → later gameweek (history is descending, so idx-1 = higher GW) */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 border border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-30"
+                  disabled={(() => {
+                    const idx = payload.history.findIndex((r) => r.gameweek === viewGameweek);
+                    return idx <= 0;
+                  })()}
+                  onClick={() => {
+                    const idx = payload.history.findIndex((r) => r.gameweek === viewGameweek);
+                    if (idx > 0) {
+                      const later = payload.history[idx - 1].gameweek;
+                      selectViewGameweek(later, selectedAccount.id, payload.currentGameweek ?? 0);
+                    }
+                  }}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
               </div>
 
               {/* Pitch field */}
