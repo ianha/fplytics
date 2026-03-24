@@ -162,6 +162,9 @@ export function subscribeLiveGw(
       /* ignore parse errors */
     }
   };
+  // Suppress unhandled error events — EventSource auto-reconnects on failure
+  // so ECONNREFUSED during API startup is recoverable without any action here.
+  es.onerror = () => { /* reconnect handled automatically by the browser */ };
   return () => es.close();
 }
 
