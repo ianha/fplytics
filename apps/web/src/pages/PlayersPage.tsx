@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import type { PlayerCard, TeamSummary } from "@fpl/contracts";
-import { getPlayers, getTeams, getGameweeks, resolveAssetUrl } from "@/api/client";
+import type { PlayerCard, PlayerXpts, TeamSummary } from "@fpl/contracts";
+import { getPlayers, getTeams, getGameweeks, getPlayerXpts, resolveAssetUrl } from "@/api/client";
 import type { GameweekSummary } from "@fpl/contracts";
 import { formatCost, formatPercent } from "@/lib/format";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,8 @@ const _playersDataCache = new Map<string, PlayerCard[]>();
 let _savedParams = ""; // always up-to-date filter/sort URL string, even before first fetch completes
 let _teamsCache: TeamSummary[] | null = null;
 let _gameweeksCache: GameweekSummary[] | null = null;
+let _xptsCache: PlayerXpts[] | null = null;
+let _xptsMap = new Map<number, number | null>(); // playerId → xpts
 let _latestFetchId = 0; // increments on every fetchPlayers call; stale responses are discarded
 
 function getSavedParam(key: string, fallback = ""): string {
@@ -85,6 +87,18 @@ const COLUMNS: ColDef[] = [
   { key: "cleanSheets",       label: "CS",     title: "Clean Sheets",   align: "right", sortable: true },
   { key: "bonus",             label: "Bonus",  align: "right", sortable: true },
   { key: "defensiveContribution", label: "DC", title: "Defensive Contribution", align: "right", sortable: true },
+  {
+    key: "xPts",
+    label: "xPts",
+    title: "Expected Points (next GW)",
+    align: "right",
+    sortable: true,
+    format: (_v: number | string, player: PlayerCard) => {
+      const v = _xptsMap.get(player.id);
+      if (v == null) return <span className="text-white/25">—</span>;
+      return <span className="font-semibold text-accent">{v.toFixed(1)}</span>;
+    },
+  },
   // Goals group
   { key: "goalsScored",              label: "G",   title: "Goals",                    align: "right", sortable: true, group: "Goals" },
   { key: "expectedGoals",            label: "xG",  title: "Expected Goals",           align: "right", sortable: true, format: (v) => Number(v).toFixed(2), group: "Goals" },
@@ -201,6 +215,7 @@ export function PlayersPage() {
   });
   const [teams, setTeams] = useState<TeamSummary[]>(() => _teamsCache ?? []);
   const [gameweeks, setGameweeks] = useState<GameweekSummary[]>(() => _gameweeksCache ?? []);
+  const [xptsLoaded, setXptsLoaded] = useState(() => _xptsCache !== null);
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -212,6 +227,16 @@ export function PlayersPage() {
   }, []);
 
   useEffect(() => {
+    // xPts — fetch once, populate module-level map, trigger re-render
+    if (!_xptsCache) {
+      getPlayerXpts()
+        .then((data) => {
+          _xptsCache = data;
+          _xptsMap = new Map(data.map((x) => [x.playerId, x.xpts]));
+          setXptsLoaded(true);
+        })
+        .catch(() => {});
+    }
     // Teams — skip if already cached
     if (_teamsCache) {
       setTeams(_teamsCache);
@@ -328,12 +353,21 @@ export function PlayersPage() {
 
   const players = useMemo(() => {
     if (state.status !== "ready") return [];
-    return filterAndSortPlayers(
+    const sorted = filterAndSortPlayers(
       state.data,
       { statusFilter, minPrice, maxPrice, minMinutes },
-      { key: sortCol, dir: sortDir },
+      { key: sortCol === "xPts" ? "totalPoints" : sortCol, dir: sortDir },
     );
-  }, [state, statusFilter, minPrice, maxPrice, minMinutes, sortCol, sortDir]);
+    if (sortCol === "xPts") {
+      sorted.sort((a, b) => {
+        const av = _xptsMap.get(a.id) ?? -1;
+        const bv = _xptsMap.get(b.id) ?? -1;
+        return sortDir === "desc" ? bv - av : av - bv;
+      });
+    }
+    return sorted;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, statusFilter, minPrice, maxPrice, minMinutes, sortCol, sortDir, xptsLoaded]);
 
   const teamImageMap = useMemo(
     () => new Map(teams.map((t) => [t.id, resolveAssetUrl(t.imagePath)])),

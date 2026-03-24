@@ -349,6 +349,22 @@ JOIN teams t ON t.id = ph.team_id
 WHERE ph.player_id = ?
 ORDER BY ph.kickoff_time;
 
+## xPts model (Expected Points)
+FPlytics computes xPts per player for the next gameweek via GET /api/players/xpts. The heuristic model:
+  xPts = (xG_per_90 × goal_points_for_position + xA_per_90 × 3 + saves_per_90 × 0.33) × minutes_probability
+         + clean_sheet_probability × cs_points_for_position
+         + minutes_probability × 2   {appearance points}
+         + avg_bonus
+         × fixture_difficulty_multiplier (0.75–1.2 based on FDR)
+All inputs use the player's last 5 GW averages from player_history. Players with <2 GW history return xPts: null.
+Use xPts when the user asks: "who should I captain?", "who has the best fixture?", "who should I buy?".
+
+## FDR (Fixture Difficulty Rating)
+FPlytics computes xG-based FDR via GET /api/fixtures/fdr — not the official FPL 1–5 rating.
+Algorithm: opponent_strength = (team_xG_for / league_avg_xG) + (team_xG_against / league_avg_xGC), binned into 1–5.
+Difficulty 1 = very easy, 5 = very hard. A blank GW (BGW) has no fixture entry.
+Use FDR when the user asks about fixture difficulty, who has the best fixtures, or chip timing advice.
+
 ## Query pitfalls to avoid
 1. ⚠ my_team_picks.position is the squad SLOT (1–15), not football position — join to players.position_id for GKP/DEF/MID/FWD
 2. ⚠ player_history has multiple rows per round in double gameweeks — always GROUP BY round and SUM/AVG rather than selecting a single row

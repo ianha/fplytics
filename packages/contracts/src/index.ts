@@ -208,3 +208,42 @@ export type MyTeamPageResponse = {
   seasons: MyTeamSeasonSummary[];
   history: MyTeamHistoryRow[];
 };
+
+export type FdrFixture = {
+  gameweek: number;
+  opponentId: number;
+  opponentShort: string;
+  difficulty: 1 | 2 | 3 | 4 | 5;
+  isHome: boolean;
+};
+
+export type FdrRow = {
+  teamId: number;
+  teamName: string;
+  teamShortName: string;
+  fixtures: FdrFixture[];
+};
+
+export type PlayerXpts = {
+  playerId: number;
+  playerName: string;
+  teamShortName: string;
+  position: string;
+  nextOpponent: string;
+  difficulty: number;
+  xpts: number | null;
+  form: number;
+  minutesProbability: number;
+};
+
+export type CaptainRecommendation = {
+  rank: number;
+  playerId: number;
+  playerName: string;
+  teamShortName: string;
+  position: string;
+  xpts: number | null;
+  nextOpponent: string;
+  difficulty: number;
+  reasoning: string;
+};

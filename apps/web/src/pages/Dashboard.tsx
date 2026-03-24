@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, MotionConfig, useMotionValue, useMotionTemplate, animate } from "framer-motion";
-import type { OverviewResponse } from "@fpl/contracts";
-import { getOverview, resolveAssetUrl } from "@/api/client";
+import type { OverviewResponse, PlayerXpts } from "@fpl/contracts";
+import { getOverview, getPlayerXpts, resolveAssetUrl } from "@/api/client";
 import { formatCost } from "@/lib/format";
 import { GlowCard, BGPattern } from "@/components/ui/glow-card";
 import {
@@ -14,6 +14,7 @@ import {
   Star,
   Clock,
   Zap,
+  Sparkles,
 } from "lucide-react";
 
 type AsyncState<T> =
@@ -30,10 +31,37 @@ const POSITION_LABELS: Record<number, { short: string; color: string }> = {
 
 
 let _dashboardCache: OverviewResponse | null = null;
+let _dashboardXptsCache: PlayerXpts[] | null = null;
+
+// Best XI: top xPts player per position slot (GKP×1, DEF×4, MID×4, FWD×2 = 11)
+const BEST_XI_SLOTS: { posId: number; label: string; count: number }[] = [
+  { posId: 1, label: "GKP", count: 1 },
+  { posId: 2, label: "DEF", count: 4 },
+  { posId: 3, label: "MID", count: 4 },
+  { posId: 4, label: "FWD", count: 2 },
+];
+
+function buildBestXI(xptsList: PlayerXpts[]): PlayerXpts[] {
+  const result: PlayerXpts[] = [];
+  for (const slot of BEST_XI_SLOTS) {
+    const candidates = xptsList
+      .filter((p) => {
+        const posMap: Record<string, number> = { Goalkeeper: 1, Defender: 2, Midfielder: 3, Forward: 4 };
+        return posMap[p.position] === slot.posId && p.xpts !== null;
+      })
+      .sort((a, b) => (b.xpts ?? 0) - (a.xpts ?? 0))
+      .slice(0, slot.count);
+    result.push(...candidates);
+  }
+  return result;
+}
 
 export function Dashboard() {
   const [state, setState] = useState<AsyncState<OverviewResponse>>(
     () => _dashboardCache ? { status: "ready", data: _dashboardCache } : { status: "loading" }
+  );
+  const [bestXI, setBestXI] = useState<PlayerXpts[]>(
+    () => _dashboardXptsCache ? buildBestXI(_dashboardXptsCache) : [],
   );
   // Skip entrance animations when data was already in cache at mount time
   const noAnim = useRef(state.status === "ready").current;
@@ -51,6 +79,14 @@ export function Dashboard() {
   const backgroundImage = useMotionTemplate`radial-gradient(125% 125% at 50% 0%, #0d0118 50%, ${color})`;
 
   useEffect(() => {
+    if (!_dashboardXptsCache) {
+      getPlayerXpts()
+        .then((data) => {
+          _dashboardXptsCache = data;
+          setBestXI(buildBestXI(data));
+        })
+        .catch(() => {});
+    }
     if (_dashboardCache) return;
     getOverview()
       .then((data) => {
@@ -336,6 +372,54 @@ export function Dashboard() {
               </GlowCard>
             </div>
           </div>
+
+          {/* Best XI by xPts */}
+          {bestXI.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-xl font-bold flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-accent" />
+                  Best XI by xPts
+                </h2>
+                <Link
+                  to="/players?col=xPts&dir=desc"
+                  className="text-xs text-white/50 hover:text-accent transition-colors flex items-center gap-1"
+                >
+                  All players <ChevronRight className="w-3 h-3" />
+                </Link>
+              </div>
+              <GlowCard className="p-5" glowColor="teal">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                  {bestXI.map((p) => {
+                    const posColors: Record<string, string> = {
+                      Goalkeeper: "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
+                      Defender: "border-blue-500/30 bg-blue-500/10 text-blue-300",
+                      Midfielder: "border-green-500/30 bg-green-500/10 text-green-300",
+                      Forward: "border-pink-500/30 bg-pink-500/10 text-pink-300",
+                    };
+                    const posShort: Record<string, string> = { Goalkeeper: "GKP", Defender: "DEF", Midfielder: "MID", Forward: "FWD" };
+                    const posClass = posColors[p.position] ?? "border-white/20 bg-white/10 text-white/70";
+                    return (
+                      <Link key={p.playerId} to={`/players/${p.playerId}`}>
+                        <div className="flex flex-col items-center gap-1.5 rounded-xl border border-white/8 bg-white/4 p-3 text-center hover:bg-white/8 transition-colors cursor-pointer">
+                          <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${posClass}`}>
+                            {posShort[p.position] ?? p.position}
+                          </span>
+                          <span className="text-xs font-semibold text-white truncate w-full text-center">{p.playerName}</span>
+                          <span className="text-[10px] text-white/40">{p.teamShortName}</span>
+                          <div className="mt-0.5">
+                            <span className="font-display text-base font-bold text-accent">{p.xpts?.toFixed(1)}</span>
+                            <span className="text-[9px] text-white/40 ml-0.5">xPts</span>
+                          </div>
+                          <span className="text-[9px] text-white/30">vs {p.nextOpponent}</span>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </GlowCard>
+            </div>
+          )}
         </div>
       </motion.div>
     </MotionConfig>

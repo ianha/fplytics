@@ -1,4 +1,6 @@
 import type {
+  CaptainRecommendation,
+  FdrRow,
   FixtureCard,
   GameweekSummary,
   MyTeamAccountSummary,
@@ -12,6 +14,7 @@ import type {
   PlayerCard,
   PlayerDetail,
   PlayerHistoryPoint,
+  PlayerXpts,
   TeamSummary,
 } from "@fpl/contracts";
 import type { AppDatabase } from "../db/database.js";
@@ -677,5 +680,277 @@ export class QueryService {
       ),
       status: this.getPrefixedPlayerValue<"status">(row, prefix, "Status"),
     };
+  }
+
+  // ─── FDR ──────────────────────────────────────────────────────────────────
+
+  getFdrData(): FdrRow[] {
+    // Compute per-team xG averages from recent player_history (last 38 rounds)
+    const teamStats = this.db.prepare(`
+      SELECT
+        ph.team_id AS teamId,
+        AVG(ph.expected_goals) AS avgXg,
+        AVG(ph.expected_goals_conceded) AS avgXgc
+      FROM player_history ph
+      WHERE ph.team_id IS NOT NULL
+      GROUP BY ph.team_id
+    `).all() as { teamId: number; avgXg: number; avgXgc: number }[];
+
+    const leagueAvgXg = teamStats.reduce((s, t) => s + (t.avgXg ?? 0), 0) / (teamStats.length || 1);
+    const leagueAvgXgc = teamStats.reduce((s, t) => s + (t.avgXgc ?? 0), 0) / (teamStats.length || 1);
+
+    const strengthMap = new Map(teamStats.map((t) => {
+      const attackStrength = leagueAvgXg > 0 ? (t.avgXg ?? 0) / leagueAvgXg : 1;
+      const defenceWeakness = leagueAvgXgc > 0 ? (t.avgXgc ?? 0) / leagueAvgXgc : 1;
+      // Higher score = harder opponent (strong attack + weak defence)
+      const raw = (attackStrength + defenceWeakness) / 2;
+      return [t.teamId, raw];
+    }));
+
+    // Bin raw scores into 1–5
+    const allScores = [...strengthMap.values()];
+    const minScore = Math.min(...allScores);
+    const maxScore = Math.max(...allScores);
+    const range = maxScore - minScore || 1;
+
+    function binDifficulty(raw: number): 1 | 2 | 3 | 4 | 5 {
+      const normalised = (raw - minScore) / range; // 0–1
+      if (normalised < 0.2) return 1;
+      if (normalised < 0.4) return 2;
+      if (normalised < 0.6) return 3;
+      if (normalised < 0.8) return 4;
+      return 5;
+    }
+
+    // Get upcoming fixtures (not yet finished) with GW numbers
+    type FdrFixtureRow = {
+      teamId: number;
+      teamName: string;
+      teamShortName: string;
+      gameweek: number;
+      opponentId: number;
+      opponentShort: string;
+      isHome: number;
+    };
+    const upcoming = this.db.prepare(`
+      SELECT
+        t.id AS teamId,
+        t.name AS teamName,
+        t.short_name AS teamShortName,
+        f.event_id AS gameweek,
+        opp.id AS opponentId,
+        opp.short_name AS opponentShort,
+        CASE WHEN f.team_h = t.id THEN 1 ELSE 0 END AS isHome
+      FROM teams t
+      JOIN fixtures f ON (f.team_h = t.id OR f.team_a = t.id)
+      JOIN teams opp ON opp.id = CASE WHEN f.team_h = t.id THEN f.team_a ELSE f.team_h END
+      WHERE f.finished = 0
+        AND f.event_id IS NOT NULL
+      ORDER BY t.id, f.event_id
+    `).all() as FdrFixtureRow[];
+
+    // Group by team, take next 8 gameweeks
+    const teamMap = new Map<number, FdrRow>();
+    for (const row of upcoming) {
+      if (!teamMap.has(row.teamId)) {
+        teamMap.set(row.teamId, {
+          teamId: row.teamId,
+          teamName: row.teamName,
+          teamShortName: row.teamShortName,
+          fixtures: [],
+        });
+      }
+      const team = teamMap.get(row.teamId)!;
+      if (team.fixtures.length < 8) {
+        const opponentStrength = strengthMap.get(row.opponentId) ?? (minScore + range / 2);
+        team.fixtures.push({
+          gameweek: row.gameweek,
+          opponentId: row.opponentId,
+          opponentShort: row.opponentShort,
+          difficulty: binDifficulty(opponentStrength),
+          isHome: Boolean(row.isHome),
+        });
+      }
+    }
+
+    return [...teamMap.values()].sort((a, b) => a.teamName.localeCompare(b.teamName));
+  }
+
+  // ─── xPts ─────────────────────────────────────────────────────────────────
+
+  getPlayerXpts(gameweek?: number): PlayerXpts[] {
+    // Points values by position (FPL scoring)
+    const GOAL_POINTS: Record<number, number> = { 1: 6, 2: 6, 3: 5, 4: 4 };
+    const CS_POINTS: Record<number, number>   = { 1: 6, 2: 6, 3: 1, 4: 0 };
+    const ASSIST_POINTS = 3;
+    const APPEARANCE_POINTS_PER_90 = 2;
+    const SAVE_POINTS_PER_3 = 1;
+
+    // Use recent player history for form stats (last 5 GWs)
+    type HistoryAgg = {
+      playerId: number; avgXg: number; avgXa: number;
+      avgMinutes: number; avgBonus: number; avgXgc: number; avgSaves: number;
+      gwCount: number;
+    };
+    const historyRows = this.db.prepare(`
+      SELECT
+        ph.player_id AS playerId,
+        AVG(ph.expected_goals) AS avgXg,
+        AVG(ph.expected_assists) AS avgXa,
+        AVG(ph.minutes) AS avgMinutes,
+        AVG(ph.bonus) AS avgBonus,
+        AVG(ph.expected_goals_conceded) AS avgXgc,
+        AVG(ph.saves) AS avgSaves,
+        COUNT(*) AS gwCount
+      FROM player_history ph
+      WHERE ph.round IN (
+        SELECT DISTINCT round FROM player_history ORDER BY round DESC LIMIT 5
+      )
+      GROUP BY ph.player_id
+    `).all() as HistoryAgg[];
+    const histMap = new Map(historyRows.map((r) => [r.playerId, r]));
+
+    // Get FDR data to compute fixture difficulty multiplier
+    const fdrRows = this.getFdrData();
+    const fdrMap = new Map(fdrRows.map((r) => [r.teamId, r]));
+
+    // Get all players with their team, position, and next fixture
+    type PlayerRow = {
+      id: number; webName: string; teamId: number; teamShortName: string;
+      positionId: number; positionName: string; form: number;
+    };
+    const players = this.db.prepare(`
+      SELECT p.id, p.web_name AS webName, p.team_id AS teamId,
+             t.short_name AS teamShortName,
+             p.position_id AS positionId, pos.name AS positionName,
+             p.form
+      FROM players p
+      JOIN teams t ON t.id = p.team_id
+      JOIN positions pos ON pos.id = p.position_id
+      WHERE p.status != 'u'
+      ORDER BY p.id
+    `).all() as PlayerRow[];
+
+    // Get next fixture per team (for specified GW or very next one)
+    type NextFixtureRow = {
+      teamId: number; opponentId: number; opponentShort: string;
+      isHome: number; gameweek: number;
+    };
+    const gwFilter = gameweek ? `AND f.event_id = ${gameweek}` : "";
+    const nextFixtures = this.db.prepare(`
+      SELECT
+        t.id AS teamId,
+        opp.id AS opponentId,
+        opp.short_name AS opponentShort,
+        CASE WHEN f.team_h = t.id THEN 1 ELSE 0 END AS isHome,
+        f.event_id AS gameweek
+      FROM teams t
+      JOIN fixtures f ON (f.team_h = t.id OR f.team_a = t.id)
+      JOIN teams opp ON opp.id = CASE WHEN f.team_h = t.id THEN f.team_a ELSE f.team_h END
+      WHERE f.finished = 0
+        AND f.event_id IS NOT NULL
+        ${gwFilter}
+      ORDER BY t.id, f.event_id
+    `).all() as NextFixtureRow[];
+
+    // Pick first upcoming fixture per team
+    const nextFixtureMap = new Map<number, NextFixtureRow>();
+    for (const f of nextFixtures) {
+      if (!nextFixtureMap.has(f.teamId)) nextFixtureMap.set(f.teamId, f);
+    }
+
+    return players.map((p) => {
+      const hist = histMap.get(p.id);
+      const nextFix = nextFixtureMap.get(p.teamId);
+      const fdrTeam = nextFix ? fdrMap.get(p.teamId) : undefined;
+      const fixture = fdrTeam?.fixtures.find((f) => f.opponentId === nextFix?.opponentId);
+      const difficulty = fixture?.difficulty ?? (nextFix ? 3 : 0);
+
+      if (!hist || hist.gwCount < 2 || !nextFix) {
+        return {
+          playerId: p.id,
+          playerName: p.webName,
+          teamShortName: p.teamShortName,
+          position: p.positionName,
+          nextOpponent: nextFix?.opponentShort ?? "BGW",
+          difficulty,
+          xpts: null,
+          form: p.form,
+          minutesProbability: 0,
+        };
+      }
+
+      const minutesProbability = Math.min(1, (hist.avgMinutes ?? 0) / 90);
+      const posId = p.positionId;
+      const goalPts = GOAL_POINTS[posId] ?? 4;
+      const csPts = CS_POINTS[posId] ?? 0;
+
+      // Fixture difficulty multiplier: easy=1.2, hard=0.75
+      const diffMultipliers: Record<number, number> = { 1: 1.2, 2: 1.1, 3: 1.0, 4: 0.85, 5: 0.75 };
+      const diffMult = diffMultipliers[difficulty] ?? 1.0;
+
+      const xg = (hist.avgXg ?? 0) * goalPts;
+      const xa = (hist.avgXa ?? 0) * ASSIST_POINTS;
+      const csProb = csPts > 0 ? Math.max(0, 1 - (hist.avgXgc ?? 0)) : 0;
+      const appearance = minutesProbability * APPEARANCE_POINTS_PER_90;
+      const bonus = hist.avgBonus ?? 0;
+      const saves = posId === 1 ? ((hist.avgSaves ?? 0) / 3) * SAVE_POINTS_PER_3 : 0;
+
+      const rawXpts =
+        (xg + xa + saves) * minutesProbability +
+        csProb * csPts +
+        appearance +
+        bonus;
+
+      return {
+        playerId: p.id,
+        playerName: p.webName,
+        teamShortName: p.teamShortName,
+        position: p.positionName,
+        nextOpponent: nextFix.opponentShort,
+        difficulty,
+        xpts: Math.round(rawXpts * 10) / 10,
+        form: p.form,
+        minutesProbability,
+      };
+    });
+  }
+
+  getCaptainRecommendations(accountId: number, gameweek: number): CaptainRecommendation[] {
+    // Get the manager's current squad
+    type PickRow = { playerId: number };
+    const picks = this.db.prepare(`
+      SELECT player_id AS playerId
+      FROM my_team_picks
+      WHERE account_id = ? AND gameweek_id = ?
+        AND position <= 11
+    `).all(accountId, gameweek) as PickRow[];
+
+    if (picks.length === 0) return [];
+
+    const xptsAll = this.getPlayerXpts(gameweek);
+    const xptsMap = new Map(xptsAll.map((x) => [x.playerId, x]));
+
+    const squadXpts = picks
+      .map((p) => xptsMap.get(p.playerId))
+      .filter((x): x is PlayerXpts => x !== undefined && x.xpts !== null)
+      .sort((a, b) => (b.xpts ?? 0) - (a.xpts ?? 0))
+      .slice(0, 3);
+
+    return squadXpts.map((x, i) => ({
+      rank: i + 1,
+      playerId: x.playerId,
+      playerName: x.playerName,
+      teamShortName: x.teamShortName,
+      position: x.position,
+      xpts: x.xpts,
+      nextOpponent: x.nextOpponent,
+      difficulty: x.difficulty,
+      reasoning: [
+        `xPts: ${x.xpts?.toFixed(1)}`,
+        x.difficulty <= 2 ? "great fixture" : x.difficulty >= 4 ? "tough fixture" : "decent fixture",
+        `${(x.minutesProbability * 100).toFixed(0)}% chance of playing`,
+      ].join(" · "),
+    }));
   }
 }

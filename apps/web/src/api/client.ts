@@ -1,7 +1,10 @@
 import type {
+  CaptainRecommendation,
+  FdrRow,
   OverviewResponse,
   PlayerCard,
   PlayerDetail,
+  PlayerXpts,
   FixtureCard,
   TeamSummary,
   GameweekSummary,
@@ -122,6 +125,19 @@ export function syncMyTeam(params?: { accountId?: number; gameweek?: number; for
 
 export function getMyTeamGameweekPicks(accountId: number, gameweek: number) {
   return request<MyTeamGameweekPicksResponse>(`/my-team/picks?accountId=${accountId}&gameweek=${gameweek}`);
+}
+
+export function getFdrData() {
+  return request<FdrRow[]>("/fixtures/fdr");
+}
+
+export function getPlayerXpts(gw?: number) {
+  const q = gw ? `?gw=${gw}` : "";
+  return request<PlayerXpts[]>(`/players/xpts${q}`);
+}
+
+export function getCaptainRecommendation(accountId: number, gw: number) {
+  return request<CaptainRecommendation[]>(`/my-team/captain-pick?accountId=${accountId}&gw=${gw}`);
 }
 
 export function getChatProviders() {

@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Users,
   Calendar,
+  BarChart2,
   Menu,
   TrendingUp,
   Shield,
@@ -18,6 +19,7 @@ const navItems = [
   { to: "/my-team", label: "My Team", icon: Shield },
   { to: "/players", label: "Players", icon: Users },
   { to: "/fixtures", label: "Fixtures", icon: Calendar },
+  { to: "/fixtures/fdr", label: "FDR Ticker", icon: BarChart2 },
   { to: "/chat", label: "AI Chat", icon: MessageSquare },
 ] as const;
 

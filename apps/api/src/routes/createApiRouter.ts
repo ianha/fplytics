@@ -102,6 +102,25 @@ export function createApiRouter(db: AppDatabase) {
     }
   });
 
+  router.get("/fixtures/fdr", (_req, res) => {
+    res.json(queryService.getFdrData());
+  });
+
+  router.get("/players/xpts", (req, res) => {
+    const gw = req.query.gw ? Number(req.query.gw) : undefined;
+    res.json(queryService.getPlayerXpts(gw));
+  });
+
+  router.get("/my-team/captain-pick", (req, res) => {
+    const accountId = req.query.accountId ? Number(req.query.accountId) : undefined;
+    const gw = req.query.gw ? Number(req.query.gw) : undefined;
+    if (!accountId || !gw) {
+      res.status(400).json({ message: "accountId and gw are required" });
+      return;
+    }
+    res.json(queryService.getCaptainRecommendations(accountId, gw));
+  });
+
   router.post("/my-team/sync", async (req, res) => {
     try {
       const { accountId, gameweek, force } = req.body as {

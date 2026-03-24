@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import type { PlayerDetail } from "@fpl/contracts";
-import { getPlayer, resolveAssetUrl } from "@/api/client";
+import { getPlayer, getPlayerXpts, resolveAssetUrl } from "@/api/client";
 import { formatCost, formatPercent } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,6 +65,9 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 const _playerDetailCache = new Map<number, PlayerDetail>();
+// Shared xPts lookup — populated once, reused across player detail visits
+let _detailXptsMap = new Map<number, number | null>();
+let _detailXptsLoaded = false;
 
 export function PlayerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -73,6 +76,9 @@ export function PlayerDetailPage() {
     const cached = _playerDetailCache.get(numId);
     return cached ? { status: "ready", data: cached } : { status: "loading" };
   });
+  const [playerXpts, setPlayerXpts] = useState<number | null | undefined>(
+    _detailXptsLoaded ? (_detailXptsMap.get(Number(id)) ?? null) : undefined,
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -80,15 +86,26 @@ export function PlayerDetailPage() {
     const cached = _playerDetailCache.get(numId);
     if (cached) {
       setState({ status: "ready", data: cached });
-      return;
+    } else {
+      setState({ status: "loading" });
+      getPlayer(numId)
+        .then((data) => {
+          _playerDetailCache.set(numId, data);
+          setState({ status: "ready", data });
+        })
+        .catch((e) => setState({ status: "error", message: e.message }));
     }
-    setState({ status: "loading" });
-    getPlayer(numId)
-      .then((data) => {
-        _playerDetailCache.set(numId, data);
-        setState({ status: "ready", data });
-      })
-      .catch((e) => setState({ status: "error", message: e.message }));
+    if (!_detailXptsLoaded) {
+      getPlayerXpts()
+        .then((data) => {
+          _detailXptsMap = new Map(data.map((x) => [x.playerId, x.xpts]));
+          _detailXptsLoaded = true;
+          setPlayerXpts(_detailXptsMap.get(numId) ?? null);
+        })
+        .catch(() => {});
+    } else {
+      setPlayerXpts(_detailXptsMap.get(numId) ?? null);
+    }
   }, [id]);
 
   if (state.status === "loading") {
@@ -202,7 +219,15 @@ export function PlayerDetailPage() {
       </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-9">
+        {playerXpts !== undefined && (
+          <div className="col-span-1 rounded-lg border border-accent/30 bg-accent/10 p-3 text-center">
+            <p className="text-[10px] text-accent/70 uppercase tracking-wider mb-1">xPts</p>
+            <p className="font-display text-lg font-bold text-accent">
+              {playerXpts !== null ? playerXpts.toFixed(1) : "—"}
+            </p>
+          </div>
+        )}
         {[
           { label: "Goals", value: player.goalsScored },
           { label: "Assists", value: player.assists },

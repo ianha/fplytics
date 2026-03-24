@@ -21,7 +21,8 @@ export type PlayerColumnKey =
   | "expectedAssistPerformance"
   | PlayerComputedColumnKey
   | "expectedGoalInvolvements"
-  | "expectedGoalInvolvementPerformance";
+  | "expectedGoalInvolvementPerformance"
+  | "xPts";
 
 type PlayersSearchParamState = {
   search: string;
@@ -116,6 +117,11 @@ export function getPlayerColumnValue(
 ): number | string {
   if (key === "gi") {
     return player.goalsScored + player.assists;
+  }
+
+  if (key === "xPts") {
+    // xPts comes from external API, not PlayerCard — returns 0 as fallback for sort
+    return 0;
   }
 
   return player[key];
