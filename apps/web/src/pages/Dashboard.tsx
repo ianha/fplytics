@@ -94,15 +94,17 @@ function buildBestXI(xptsList: PlayerXpts[]): { players: PlayerXpts[]; formation
     fwd.slice(0, best.fwd),
   ];
 
-  return { players, pitchRows, formation: `${best.def}-${best.mid}-${best.fwd}` };
+  const totalXpts = players.reduce((s, p) => s + (p.xpts ?? 0), 0);
+
+  return { players, pitchRows, formation: `${best.def}-${best.mid}-${best.fwd}`, totalXpts };
 }
 
 export function Dashboard() {
   const [state, setState] = useState<AsyncState<OverviewResponse>>(
     () => _dashboardCache ? { status: "ready", data: _dashboardCache } : { status: "loading" }
   );
-  const [bestXI, setBestXI] = useState<{ players: PlayerXpts[]; pitchRows: PlayerXpts[][]; formation: string }>(
-    () => _dashboardXptsCache ? buildBestXI(_dashboardXptsCache) : { players: [], pitchRows: [], formation: "" },
+  const [bestXI, setBestXI] = useState<{ players: PlayerXpts[]; pitchRows: PlayerXpts[][]; formation: string; totalXpts: number }>(
+    () => _dashboardXptsCache ? buildBestXI(_dashboardXptsCache) : { players: [], pitchRows: [], formation: "", totalXpts: 0 },
   );
   // Skip entrance animations when data was already in cache at mount time
   const noAnim = useRef(state.status === "ready").current;
@@ -416,13 +418,16 @@ export function Dashboard() {
 
           {/* Optimal XI pitch view */}
           {bestXI.players.length > 0 && (
-            <div className="space-y-4">
+            <div className="space-y-4 max-w-lg mx-auto w-full">
               <div className="flex items-center justify-between">
                 <h2 className="font-display text-xl font-bold flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-accent" />
                   Optimal XI
                   {bestXI.formation && (
                     <span className="text-sm font-normal text-white/40 ml-1">({bestXI.formation})</span>
+                  )}
+                  {bestXI.totalXpts > 0 && (
+                    <span className="text-sm font-bold text-accent ml-2">{bestXI.totalXpts.toFixed(1)} xPts</span>
                   )}
                 </h2>
                 <Link
