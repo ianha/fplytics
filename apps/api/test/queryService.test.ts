@@ -109,4 +109,59 @@ describe("QueryService", () => {
       player: { webName: "Salah" },
     });
   });
+
+  it("getGwCalendar returns BGW rows and DGW rows correctly", () => {
+    const db = createDatabase(path.join(tempDir, "test.sqlite"));
+    seedPublicData(db);
+
+    // GW 29 is current
+    db.prepare(
+      `INSERT INTO gameweeks (id, name, deadline_time, average_entry_score, highest_score, is_current, is_finished, updated_at)
+       VALUES (29, 'Gameweek 29', ?, 55, 104, 1, 0, ?)`,
+    ).run("2026-03-22T10:00:00.000Z", now());
+
+    // Arsenal (teamId=1) has a normal GW29 fixture (home vs Liverpool)
+    db.prepare(
+      `INSERT INTO fixtures (id, code, event_id, kickoff_time, team_h, team_a, team_h_score, team_a_score, finished, started, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(901, 9901, 29, "2026-03-29T15:00:00.000Z", 1, 2, null, null, 0, 0, now());
+
+    // Arsenal also has a second GW29 fixture (DGW) — away at Liverpool (artificial DGW for test)
+    db.prepare(
+      `INSERT INTO fixtures (id, code, event_id, kickoff_time, team_h, team_a, team_h_score, team_a_score, finished, started, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(902, 9902, 29, "2026-03-31T20:00:00.000Z", 2, 1, null, null, 0, 0, now());
+
+    // GW30 has only Arsenal (Liverpool is BGW in GW30)
+    db.prepare(
+      `INSERT INTO gameweeks (id, name, deadline_time, average_entry_score, highest_score, is_current, is_finished, updated_at)
+       VALUES (30, 'Gameweek 30', ?, 55, 104, 0, 0, ?)`,
+    ).run("2026-04-05T10:00:00.000Z", now());
+
+    db.prepare(
+      `INSERT INTO fixtures (id, code, event_id, kickoff_time, team_h, team_a, team_h_score, team_a_score, finished, started, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(903, 9903, 30, "2026-04-12T15:00:00.000Z", 1, 2, null, null, 0, 0, now());
+
+    const queryService = new QueryService(db);
+    const calendar = queryService.getGwCalendar();
+
+    const arsenal = calendar.find((r) => r.teamShortName === "ARS");
+    const liverpool = calendar.find((r) => r.teamShortName === "LIV");
+
+    expect(arsenal).toBeDefined();
+    expect(liverpool).toBeDefined();
+
+    // Arsenal GW29: DGW (2 fixtures)
+    expect(arsenal!.gameweeks[29]).toHaveLength(2);
+
+    // Liverpool GW30: BGW (0 fixtures — no fixture seeded for LIV in GW30)
+    expect(liverpool!.gameweeks[30]).toHaveLength(0);
+
+    // Arsenal GW29 home fixture has isHome:true and opponentShort:"LIV"
+    const arsenalGw29 = arsenal!.gameweeks[29];
+    expect(arsenalGw29.some((f) => f.isHome && f.opponentShort === "LIV")).toBe(true);
+    // Arsenal GW29 away fixture has isHome:false
+    expect(arsenalGw29.some((f) => !f.isHome && f.opponentShort === "LIV")).toBe(true);
+  });
 });

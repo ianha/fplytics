@@ -128,6 +128,8 @@ vi.mock("@/api/client", () => ({
   syncMyTeam: syncMyTeamMock,
   getCaptainRecommendation: vi.fn(() => Promise.resolve([])),
   resolveAssetUrl: vi.fn(() => null),
+  subscribeLiveGw: vi.fn(() => vi.fn()), // returns a no-op unsubscribe fn
+  getLiveGwSnapshot: vi.fn(() => Promise.resolve(null)),
 }));
 
 describe("MyTeamPage", () => {

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { motion, MotionConfig, useMotionValue, useMotionTemplate, animate } from "framer-motion";
 import { ArrowRightLeft, ChevronLeft, ChevronRight, Coins, Crown, ExternalLink, ShieldAlert, Sparkles, Trophy, Zap } from "lucide-react";
-import type { CaptainRecommendation, MyTeamGameweekPicksResponse, MyTeamPageResponse, MyTeamPick, PlayerDetail } from "@fpl/contracts";
-import { getCaptainRecommendation, getMyTeam, getMyTeamGameweekPicks, getPlayer, linkMyTeamAccount, resolveAssetUrl, syncMyTeam } from "@/api/client";
+import type { CaptainRecommendation, LiveGwUpdate, MyTeamGameweekPicksResponse, MyTeamPageResponse, MyTeamPick, PlayerDetail } from "@fpl/contracts";
+import { getCaptainRecommendation, getMyTeam, getMyTeamGameweekPicks, getPlayer, linkMyTeamAccount, resolveAssetUrl, subscribeLiveGw, syncMyTeam } from "@/api/client";
 import { BGPattern, GlowCard } from "@/components/ui/glow-card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -87,6 +87,7 @@ type MyTeamCache = {
 const _myTeamCache = new Map<string, MyTeamCache>();
 const _myTeamHistoricalCache = new Map<string, MyTeamGameweekPicksResponse>();
 const _playerDetailCache = new Map<number, PlayerDetail>();
+const _liveGwCache = new Map<number, LiveGwUpdate>();
 let _myTeamSavedParams = "";
 
 export function resetMyTeamPageCacheForTests() {
@@ -273,6 +274,7 @@ export function MyTeamPage() {
     },
   );
   const [historicalLoading, setHistoricalLoading] = useState(false);
+  const [liveData, setLiveData] = useState<LiveGwUpdate | null>(null);
   const [captainRecs, setCaptainRecs] = useState<CaptainRecommendation[]>([]);
   const [selectedPick, setSelectedPick] = useState<{ pick: MyTeamPick; gwPoints: number } | null>(null);
   const [playerDetail, setPlayerDetail] = useState<PlayerDetail | null>(null);
@@ -482,6 +484,20 @@ export function MyTeamPage() {
     payload?.accounts[0] ??
     null;
   const needsRelogin = selectedAccount?.authStatus === "relogin_required";
+
+  const currentGw = payload?.currentGameweek ?? null;
+  useEffect(() => {
+    if (!currentGw) return;
+    // Pre-populate from module cache
+    const cached = _liveGwCache.get(currentGw);
+    if (cached) setLiveData(cached);
+    // Subscribe to live SSE stream
+    const unsub = subscribeLiveGw(currentGw, (update) => {
+      _liveGwCache.set(currentGw, update);
+      setLiveData(update);
+    });
+    return unsub;
+  }, [currentGw]);
 
   // Fetch captain recommendations whenever we have a linked account + current GW
   useEffect(() => {
@@ -737,7 +753,7 @@ export function MyTeamPage() {
               </div>
 
               {/* GW selector — prev/next buttons + dropdown */}
-              <div className="mb-5 inline-flex items-center gap-1.5">
+              <div className="mb-5 flex flex-wrap items-center gap-2">
                 {/* ← earlier gameweek (history is descending, so idx+1 = lower GW) */}
                 <Button
                   variant="ghost"
@@ -794,6 +810,16 @@ export function MyTeamPage() {
                 >
                   <ChevronRight className="h-3.5 w-3.5" />
                 </Button>
+                {liveData?.isLive && !viewGameweek && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-bold text-white animate-pulse">
+                    ● LIVE
+                  </span>
+                )}
+                {liveData && !liveData.isLive && !viewGameweek && (
+                  <span className="text-[11px] text-white/35">
+                    Updated {new Date(liveData.lastUpdated).toLocaleTimeString()}
+                  </span>
+                )}
               </div>
 
               {/* Pitch field */}
@@ -830,6 +856,10 @@ export function MyTeamPage() {
                     .filter((e) => e.player.positionId !== 1).length + 1;
                   return `${outfieldRank}. ${POSITION_CONFIG[entry.player.positionId]?.label ?? ""}`;
                 };
+
+                const livePointsMap = new Map(
+                  (liveData && !viewGameweek ? liveData.players : []).map((p) => [p.playerId, p.totalLivePoints])
+                );
 
                 return (
                   <div className="overflow-hidden rounded-2xl border border-white/8">
@@ -874,7 +904,7 @@ export function MyTeamPage() {
                                 <PitchPlayerCard
                                   key={entry.slotId}
                                   entry={entry}
-                                  gwPoints={gwPointsMap[entry.slotId] !== undefined ? gwPointsMap[entry.slotId] * Math.max(pickBySlotId[entry.slotId]?.multiplier ?? 1, 1) : undefined}
+                                  gwPoints={livePointsMap.size > 0 ? livePointsMap.get(entry.player.id) : (gwPointsMap[entry.slotId] !== undefined ? gwPointsMap[entry.slotId] * Math.max(pickBySlotId[entry.slotId]?.multiplier ?? 1, 1) : undefined)}
                                   multiplier={pickBySlotId[entry.slotId]?.multiplier}
                                   onClick={gwPointsMap[entry.slotId] !== undefined ? () => handleCardClick(entry.slotId) : undefined}
                                 />

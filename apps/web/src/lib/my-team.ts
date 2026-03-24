@@ -1,4 +1,4 @@
-import type { GameweekSummary, PlayerCard } from "@fpl/contracts";
+import type { GameweekSummary, LivePlayerPoints, PlayerCard } from "@fpl/contracts";
 
 export type PlannerChip = "none" | "wildcard" | "free-hit" | "bench-boost" | "triple-captain";
 
@@ -338,6 +338,23 @@ export function replaceSquadPlayer(
         }
       : entry,
   );
+}
+
+export function computeLivePoints(
+  picks: Array<{ playerId: number; multiplier: number; isStarting: boolean }>,
+  liveData: LivePlayerPoints[],
+): { totalPoints: number; pointsOnBench: number; byPlayerId: Map<number, number> } {
+  const liveMap = new Map(liveData.map((p) => [p.playerId, p.totalLivePoints]));
+  const byPlayerId = new Map<number, number>();
+  let totalPoints = 0;
+  let pointsOnBench = 0;
+  for (const pick of picks) {
+    const pts = (liveMap.get(pick.playerId) ?? 0) * pick.multiplier;
+    byPlayerId.set(pick.playerId, pts);
+    if (pick.isStarting) totalPoints += pts;
+    else pointsOnBench += pts;
+  }
+  return { totalPoints, pointsOnBench, byPlayerId };
 }
 
 export function evaluatePlanner(

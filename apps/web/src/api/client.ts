@@ -1,6 +1,8 @@
 import type {
   CaptainRecommendation,
   FdrRow,
+  GwCalendarRow,
+  LiveGwUpdate,
   OverviewResponse,
   PlayerCard,
   PlayerDetail,
@@ -131,6 +133,10 @@ export function getFdrData() {
   return request<FdrRow[]>("/fixtures/fdr");
 }
 
+export function getGwCalendar() {
+  return request<GwCalendarRow[]>("/fixtures/calendar");
+}
+
 export function getPlayerXpts(gw?: number) {
   const q = gw ? `?gw=${gw}` : "";
   return request<PlayerXpts[]>(`/players/xpts${q}`);
@@ -138,6 +144,25 @@ export function getPlayerXpts(gw?: number) {
 
 export function getCaptainRecommendation(accountId: number, gw: number) {
   return request<CaptainRecommendation[]>(`/my-team/captain-pick?accountId=${accountId}&gw=${gw}`);
+}
+
+export function getLiveGwSnapshot(gw: number) {
+  return request<LiveGwUpdate>(`/live/gw/${gw}`);
+}
+
+export function subscribeLiveGw(
+  gw: number,
+  onUpdate: (u: LiveGwUpdate) => void,
+): () => void {
+  const es = new EventSource(`/api/live/gw/${gw}/stream`);
+  es.onmessage = (e) => {
+    try {
+      onUpdate(JSON.parse(e.data) as LiveGwUpdate);
+    } catch {
+      /* ignore parse errors */
+    }
+  };
+  return () => es.close();
 }
 
 export function getChatProviders() {

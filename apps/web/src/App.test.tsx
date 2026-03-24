@@ -36,6 +36,8 @@ vi.mock("./api/client", () => ({
   getPlayer: apiMocks.getPlayer,
   getPlayerXpts: vi.fn(() => Promise.resolve([])),
   getCaptainRecommendation: vi.fn(() => Promise.resolve([])),
+  subscribeLiveGw: vi.fn(() => vi.fn()),
+  getLiveGwSnapshot: vi.fn(() => Promise.resolve(null)),
 }));
 
 describe("App", () => {

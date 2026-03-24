@@ -3,6 +3,8 @@ import type {
   FdrRow,
   FixtureCard,
   GameweekSummary,
+  GwCalendarFixture,
+  GwCalendarRow,
   MyTeamAccountSummary,
   MyTeamGameweekPicksResponse,
   MyTeamHistoryRow,
@@ -954,6 +956,67 @@ export class QueryService {
         x.difficulty <= 2 ? "great fixture" : x.difficulty >= 4 ? "tough fixture" : "decent fixture",
         `${(x.minutesProbability * 100).toFixed(0)}% chance of playing`,
       ].join(" · "),
+    }));
+  }
+
+  getGwCalendar(): GwCalendarRow[] {
+    const teams = this.db
+      .prepare(`SELECT id, name, short_name AS shortName FROM teams ORDER BY name`)
+      .all() as Array<{ id: number; name: string; shortName: string }>;
+
+    const currentGwRow = this.db
+      .prepare(`SELECT id FROM gameweeks WHERE is_current = 1 ORDER BY id LIMIT 1`)
+      .get() as { id: number } | undefined;
+    const currentGw = currentGwRow?.id ?? 1;
+
+    const fixtures = this.db
+      .prepare(
+        `SELECT f.event_id AS gameweek,
+                f.team_h AS homeTeamId, f.team_a AS awayTeamId,
+                th.short_name AS homeShort, ta.short_name AS awayShort
+         FROM fixtures f
+         JOIN teams th ON th.id = f.team_h
+         JOIN teams ta ON ta.id = f.team_a
+         WHERE f.event_id >= ? AND f.event_id <= ? AND f.event_id IS NOT NULL
+         ORDER BY f.event_id, f.id`,
+      )
+      .all(currentGw, currentGw + 9) as Array<{
+        gameweek: number;
+        homeTeamId: number;
+        awayTeamId: number;
+        homeShort: string;
+        awayShort: string;
+      }>;
+
+    const lookup = new Map<number, Map<number, GwCalendarFixture[]>>();
+    for (const t of teams) lookup.set(t.id, new Map());
+
+    for (const f of fixtures) {
+      const home = lookup.get(f.homeTeamId);
+      if (home) {
+        const arr = home.get(f.gameweek) ?? [];
+        arr.push({ opponentShort: f.awayShort, isHome: true });
+        home.set(f.gameweek, arr);
+      }
+      const away = lookup.get(f.awayTeamId);
+      if (away) {
+        const arr = away.get(f.gameweek) ?? [];
+        arr.push({ opponentShort: f.homeShort, isHome: false });
+        away.set(f.gameweek, arr);
+      }
+    }
+
+    const gwRange = Array.from(new Set(fixtures.map((f) => f.gameweek))).sort(
+      (a, b) => a - b,
+    );
+
+    return teams.map((t) => ({
+      teamId: t.id,
+      teamName: t.name,
+      teamShortName: t.shortName,
+      gameweeks: Object.fromEntries(
+        gwRange.map((gw) => [gw, lookup.get(t.id)?.get(gw) ?? []]),
+      ),
     }));
   }
 }

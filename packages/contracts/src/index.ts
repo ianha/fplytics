@@ -248,3 +248,39 @@ export type CaptainRecommendation = {
   difficulty: number;
   reasoning: string;
 };
+
+export type LivePlayerPoints = {
+  playerId: number;
+  minutes: number;
+  goals: number;
+  assists: number;
+  cleanSheet: boolean;
+  saves: number;
+  yellowCards: number;
+  redCards: number;
+  ownGoals: number;
+  penaltiesSaved: number;
+  penaltiesMissed: number;
+  goalsConceded: number;
+  bonusProvisional: number;
+  totalLivePoints: number;
+};
+
+export type LiveGwUpdate = {
+  gameweek: number;
+  lastUpdated: string; // ISO timestamp
+  isLive: boolean;     // true when matches actively in progress
+  players: LivePlayerPoints[];
+};
+
+export type GwCalendarFixture = {
+  opponentShort: string;
+  isHome: boolean;
+};
+
+export type GwCalendarRow = {
+  teamId: number;
+  teamName: string;
+  teamShortName: string;
+  gameweeks: Record<number, GwCalendarFixture[]>; // gw number → fixtures (0 = BGW, 1 = normal, 2+ = DGW)
+};

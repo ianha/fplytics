@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { GameweekSummary } from "@fpl/contracts";
-import { createMockManagers, evaluatePlanner, replaceSquadPlayer } from "./my-team";
+import type { GameweekSummary, LivePlayerPoints } from "@fpl/contracts";
+import { computeLivePoints, createMockManagers, evaluatePlanner, replaceSquadPlayer } from "./my-team";
 import { makePlayer } from "../test/factories";
 
 const players = [
@@ -29,6 +29,70 @@ const gameweeks: GameweekSummary[] = [
     isFinished: false,
   },
 ];
+
+function makeLivePlayer(playerId: number, totalLivePoints: number): LivePlayerPoints {
+  return {
+    playerId,
+    minutes: 90,
+    goals: 0,
+    assists: 0,
+    cleanSheet: false,
+    saves: 0,
+    yellowCards: 0,
+    redCards: 0,
+    ownGoals: 0,
+    penaltiesSaved: 0,
+    penaltiesMissed: 0,
+    goalsConceded: 0,
+    bonusProvisional: 0,
+    totalLivePoints,
+  };
+}
+
+describe("computeLivePoints", () => {
+  it("sums starter points and excludes bench from totalPoints", () => {
+    const picks = [
+      { playerId: 1, multiplier: 1, isStarting: true },
+      { playerId: 2, multiplier: 1, isStarting: true },
+      { playerId: 3, multiplier: 1, isStarting: false }, // bench
+    ];
+    const live = [
+      makeLivePlayer(1, 8),
+      makeLivePlayer(2, 5),
+      makeLivePlayer(3, 12),
+    ];
+    const result = computeLivePoints(picks, live);
+    expect(result.totalPoints).toBe(13);       // 8 + 5, bench excluded
+    expect(result.pointsOnBench).toBe(12);
+    expect(result.byPlayerId.get(3)).toBe(12);  // bench player tracked
+  });
+
+  it("applies captain multiplier (2×) correctly", () => {
+    const picks = [
+      { playerId: 10, multiplier: 2, isStarting: true }, // captain
+      { playerId: 11, multiplier: 1, isStarting: true },
+    ];
+    const live = [makeLivePlayer(10, 9), makeLivePlayer(11, 4)];
+    const result = computeLivePoints(picks, live);
+    expect(result.byPlayerId.get(10)).toBe(18); // 9 × 2
+    expect(result.totalPoints).toBe(22);        // 18 + 4
+  });
+
+  it("gives 0 points to a player absent from live data (DNP)", () => {
+    const picks = [{ playerId: 99, multiplier: 1, isStarting: true }];
+    const result = computeLivePoints(picks, []);
+    expect(result.totalPoints).toBe(0);
+    expect(result.byPlayerId.get(99)).toBe(0);
+  });
+
+  it("returns zero totals when picks array is empty", () => {
+    const live = [makeLivePlayer(1, 10)];
+    const result = computeLivePoints([], live);
+    expect(result.totalPoints).toBe(0);
+    expect(result.pointsOnBench).toBe(0);
+    expect(result.byPlayerId.size).toBe(0);
+  });
+});
 
 describe("my-team planner utilities", () => {
   it("creates managers with a legal 15-player squad", () => {

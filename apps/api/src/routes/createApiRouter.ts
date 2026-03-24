@@ -2,6 +2,8 @@ import { Router } from "express";
 import { QueryService } from "../services/queryService.js";
 import type { AppDatabase } from "../db/database.js";
 import { MyTeamSyncService } from "../my-team/myTeamSyncService.js";
+import { liveGwService } from "../services/liveGwService.js";
+import type { LiveGwUpdate } from "@fpl/contracts";
 
 export function createApiRouter(db: AppDatabase) {
   const router = Router();
@@ -112,6 +114,10 @@ export function createApiRouter(db: AppDatabase) {
     res.json(queryService.getFdrData());
   });
 
+  router.get("/fixtures/calendar", (_req, res) => {
+    res.json(queryService.getGwCalendar());
+  });
+
   router.get("/my-team/captain-pick", (req, res) => {
     const accountId = req.query.accountId ? Number(req.query.accountId) : undefined;
     const gw = req.query.gw ? Number(req.query.gw) : undefined;
@@ -141,6 +147,43 @@ export function createApiRouter(db: AppDatabase) {
       res.status(400).json({
         message: error instanceof Error ? error.message : String(error),
       });
+    }
+  });
+
+  // GET /api/live/gw/:gw/stream — SSE, pushes LiveGwUpdate on each poll
+  router.get("/live/gw/:gw/stream", (req, res) => {
+    const gameweek = Number(req.params.gw);
+    if (!gameweek || gameweek < 1) {
+      res.status(400).json({ message: "gameweek must be a positive integer" });
+      return;
+    }
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+    const emit = (update: LiveGwUpdate) =>
+      res.write(`data: ${JSON.stringify(update)}\n\n`);
+    const cached = liveGwService.getCached(gameweek);
+    if (cached) emit(cached);
+    liveGwService.startPolling(gameweek);
+    const unsub = liveGwService.subscribe(gameweek, emit);
+    req.on("close", unsub);
+  });
+
+  // GET /api/live/gw/:gw — REST snapshot
+  router.get("/live/gw/:gw", async (req, res) => {
+    const gameweek = Number(req.params.gw);
+    if (!gameweek || gameweek < 1) {
+      res.status(400).json({ message: "gameweek must be a positive integer" });
+      return;
+    }
+    const cached = liveGwService.getCached(gameweek);
+    if (cached) { res.json(cached); return; }
+    try {
+      await liveGwService.fetchAndCache(gameweek);
+      res.json(liveGwService.getCached(gameweek));
+    } catch (err) {
+      res.status(502).json({ message: err instanceof Error ? err.message : String(err) });
     }
   });
 
