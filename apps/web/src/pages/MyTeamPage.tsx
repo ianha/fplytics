@@ -754,6 +754,20 @@ export function MyTeamPage() {
                 )}
               </div>
 
+              {viewGameweek && selectedAccount && (
+                <div className="mb-3 flex justify-end">
+                  <button
+                    type="button"
+                    title="Share GW Recap card"
+                    onClick={() => setShareGw(viewGameweek)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/60 transition-colors hover:bg-white/10 hover:text-accent"
+                  >
+                    <Share2 className="h-3.5 w-3.5" />
+                    Share recap
+                  </button>
+                </div>
+              )}
+
               {/* GW selector — prev/next buttons + dropdown */}
               <div className="mb-5 flex flex-wrap items-center gap-2">
                 {/* ← earlier gameweek (history is descending, so idx+1 = lower GW) */}
@@ -821,17 +835,6 @@ export function MyTeamPage() {
                   <span className="text-[11px] text-white/35">
                     Updated {new Date(liveData.lastUpdated).toLocaleTimeString()}
                   </span>
-                )}
-                {viewGameweek && selectedAccount && (
-                  <button
-                    type="button"
-                    title="Share GW Recap card"
-                    onClick={() => setShareGw(viewGameweek)}
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/60 hover:bg-white/10 hover:text-accent transition-colors cursor-pointer"
-                  >
-                    <Share2 className="h-3.5 w-3.5" />
-                    Share recap
-                  </button>
                 )}
               </div>
 

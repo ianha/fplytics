@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { QueryService } from "../services/queryService.js";
 import type { AppDatabase } from "../db/database.js";
 import { MyTeamSyncService } from "../my-team/myTeamSyncService.js";
@@ -6,6 +6,75 @@ import { liveGwService } from "../services/liveGwService.js";
 import type { LiveGwUpdate } from "@fpl/contracts";
 import { RecapCardService } from "../services/recapCardService.js";
 import { env } from "../config/env.js";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function firstHeaderValue(value: string | undefined) {
+  return value?.split(",")[0]?.trim();
+}
+
+function parseForwardedHeader(value: string | undefined) {
+  if (!value) return {};
+
+  const firstEntry = value.split(",")[0]?.trim();
+  if (!firstEntry) return {};
+
+  const parts = firstEntry.split(";").map((part) => part.trim());
+  const parsed: { proto?: string; host?: string } = {};
+
+  for (const part of parts) {
+    const [rawKey, rawValue] = part.split("=", 2);
+    if (!rawKey || !rawValue) continue;
+
+    const key = rawKey.trim().toLowerCase();
+    const value = rawValue.trim().replace(/^"|"$/g, "");
+
+    if (key === "proto") parsed.proto = value;
+    if (key === "host") parsed.host = value;
+  }
+
+  return parsed;
+}
+
+function hostLooksLocal(host: string | undefined) {
+  if (!host) return true;
+  const normalized = host.toLowerCase();
+
+  return (
+    normalized.includes("localhost") ||
+    normalized.startsWith("127.0.0.1") ||
+    normalized.startsWith("[::1]") ||
+    normalized.startsWith("0.0.0.0") ||
+    normalized.endsWith(".internal") ||
+    normalized.endsWith(".local")
+  );
+}
+
+function getRequestOrigin(req: Request) {
+  const forwarded = parseForwardedHeader(req.get("forwarded"));
+  const proto =
+    forwarded.proto ||
+    firstHeaderValue(req.get("x-forwarded-proto")) ||
+    firstHeaderValue(req.get("x-original-proto")) ||
+    req.protocol;
+  const host =
+    forwarded.host ||
+    firstHeaderValue(req.get("x-forwarded-host")) ||
+    firstHeaderValue(req.get("x-original-host")) ||
+    req.get("host");
+
+  if (hostLooksLocal(host) && env.publicUrl) {
+    return env.publicUrl;
+  }
+
+  return `${proto}://${host}`;
+}
 
 export function createApiRouter(db: AppDatabase) {
   const router = Router();
@@ -156,7 +225,7 @@ export function createApiRouter(db: AppDatabase) {
   // GET /api/my-team/:accountId/recap/:gw/preview — HTML page with OG/Twitter card meta tags
   // so X/WhatsApp/Telegram scrapers render the recap image inline when the link is shared.
   // Real browsers are immediately redirected to the PNG via <meta http-equiv="refresh">.
-  router.get("/my-team/:accountId/recap/:gw/preview", (req, res) => {
+  router.get("/my-team/:accountId/recap/:gw/preview", async (req, res) => {
     const accountId = Number(req.params.accountId);
     const gw = Number(req.params.gw);
     if (!accountId || !gw) {
@@ -169,37 +238,57 @@ export function createApiRouter(db: AppDatabase) {
       return;
     }
 
-    // Escape HTML special characters to prevent injection into meta tag attributes
-    function esc(s: string): string {
-      return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
+    try {
+      const asset = await recapCardService.ensureCardAsset(data);
+      const origin = getRequestOrigin(req);
+      const previewUrl = `${origin}/api/my-team/${accountId}/recap/${gw}/preview`;
+      const imageUrl = `${origin}${asset.relativePath}`;
+      const title = escapeHtml(`${data.managerName} — GW${gw} Recap`);
+      const description = escapeHtml(`${data.points} pts · Rank #${data.overallRank.toLocaleString()} · ${data.teamName}`);
+      const imageAlt = escapeHtml(`${data.teamName} gameweek ${gw} recap card`);
+      const safeImageUrl = escapeHtml(imageUrl);
+      const safePreviewUrl = escapeHtml(previewUrl);
+      const safeRelativeImageUrl = escapeHtml(asset.relativePath);
 
-    const origin = env.publicUrl || `${req.protocol}://${req.get("host")}`;
-    const imageUrl = `${origin}/api/my-team/${accountId}/recap/${gw}`;
-    const title = esc(`${data.managerName} — GW${gw} Recap`);
-    const description = esc(`${data.points} pts · Rank #${data.overallRank.toLocaleString()} · ${data.teamName}`);
-    const safeImageUrl = esc(imageUrl);
-
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`<!DOCTYPE html>
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>${title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="${description}">
+  <meta property="og:url" content="${safePreviewUrl}">
+  <meta property="og:site_name" content="FPLytics">
   <meta property="og:title" content="${title}">
   <meta property="og:description" content="${description}">
   <meta property="og:image" content="${safeImageUrl}">
+  <meta property="og:image:url" content="${safeImageUrl}">
+  <meta property="og:image:secure_url" content="${safeImageUrl}">
   <meta property="og:image:width" content="480">
   <meta property="og:image:height" content="320">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:alt" content="${imageAlt}">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="${title}">
   <meta name="twitter:description" content="${description}">
   <meta name="twitter:image" content="${safeImageUrl}">
-  <meta http-equiv="refresh" content="0;url=${safeImageUrl}">
+  <meta name="twitter:image:alt" content="${imageAlt}">
+  <link rel="canonical" href="${safePreviewUrl}">
 </head>
-<body></body>
+<body>
+  <main>
+    <h1>${title}</h1>
+    <p>${description}</p>
+    <img src="${safeRelativeImageUrl}" alt="${imageAlt}" width="480" height="320">
+    <p><a href="${safeRelativeImageUrl}">Open recap image</a></p>
+  </main>
+</body>
 </html>`);
+    } catch (err) {
+      res.status(500).send(err instanceof Error ? err.message : "Failed to render recap card");
+    }
   });
 
   router.get("/my-team/:accountId/recap/:gw", async (req, res) => {
@@ -215,13 +304,13 @@ export function createApiRouter(db: AppDatabase) {
       return;
     }
     try {
-      const png = await recapCardService.renderCard(data);
+      const asset = await recapCardService.ensureCardAsset(data);
       res.setHeader("Content-Type", "image/png");
       res.setHeader(
         "Content-Disposition",
         `inline; filename="fplytics-gw${gw}-recap.png"`,
       );
-      res.send(png);
+      res.sendFile(asset.absolutePath);
     } catch (err) {
       res.status(500).json({
         message: err instanceof Error ? err.message : "Failed to render recap card",

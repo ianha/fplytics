@@ -29,36 +29,11 @@ describe("ShareRecapDialog", () => {
     expect(img).toHaveAttribute("src", "/api/my-team/1/recap/7");
   });
 
-  it("renders X, WhatsApp, Telegram buttons that open /preview deep-link URLs", () => {
+  it("does not render X, WhatsApp, or Telegram buttons", () => {
     render(<ShareRecapDialog {...DEFAULT_PROPS} />);
-
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-
-    const xBtn = screen.getByRole("button", { name: /post to x/i });
-    fireEvent.click(xBtn);
-    expect(openSpy).toHaveBeenCalledWith(
-      expect.stringContaining("twitter.com/intent/tweet"),
-      "_blank",
-      "noreferrer",
-    );
-    // Deep-link should encode the /preview URL, not the raw PNG
-    // The preview path is URL-encoded inside the query string, so decode before asserting
-    const xCall = decodeURIComponent(openSpy.mock.calls[0][0] as string);
-    expect(xCall).toContain("/recap/7/preview");
-    openSpy.mockClear();
-
-    const waBtn = screen.getByRole("button", { name: /send on whatsapp/i });
-    fireEvent.click(waBtn);
-    expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("wa.me"), "_blank", "noreferrer");
-    const waCall = decodeURIComponent(openSpy.mock.calls[0][0] as string);
-    expect(waCall).toContain("/recap/7/preview");
-    openSpy.mockClear();
-
-    const tgBtn = screen.getByRole("button", { name: /send on telegram/i });
-    fireEvent.click(tgBtn);
-    expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("t.me/share/url"), "_blank", "noreferrer");
-    const tgCall = decodeURIComponent(openSpy.mock.calls[0][0] as string);
-    expect(tgCall).toContain("/recap/7/preview");
+    expect(screen.queryByRole("button", { name: /post to x/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send on whatsapp/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send on telegram/i })).not.toBeInTheDocument();
   });
 
   it("does not render the Share image button when navigator.canShare is unavailable (jsdom)", () => {

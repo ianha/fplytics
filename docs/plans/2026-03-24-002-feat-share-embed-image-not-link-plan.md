@@ -1,7 +1,7 @@
 ---
 title: "feat: Share recap card as embedded image, not a link"
 type: feat
-status: active
+status: completed
 date: 2026-03-24
 origin: docs/plans/2026-03-24-001-feat-share-recap-card-dialog-plan.md
 ---

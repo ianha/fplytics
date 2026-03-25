@@ -1,7 +1,12 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import sharp from "sharp";
+import { env } from "../config/env.js";
 import type { AppDatabase } from "../db/database.js";
 
 export type RecapData = {
+  accountId: number;
   managerName: string;
   teamName: string;
   gameweek: number;
@@ -17,7 +22,10 @@ export type RecapData = {
 };
 
 export class RecapCardService {
-  constructor(private readonly db: AppDatabase) {}
+  constructor(
+    private readonly db: AppDatabase,
+    private readonly assetsDir = env.assetsDir,
+  ) {}
 
   getRecapData(accountId: number, gameweek: number): RecapData | null {
     // Account info
@@ -80,6 +88,7 @@ export class RecapCardService {
       | undefined;
 
     return {
+      accountId,
       managerName: account.managerName.trim(),
       teamName: account.teamName,
       gameweek,
@@ -93,6 +102,24 @@ export class RecapCardService {
       captainPoints: captain?.effectivePoints ?? 0,
       hitsCost: gw.hitsCost ?? 0,
     };
+  }
+
+  async ensureCardAsset(data: RecapData): Promise<{ relativePath: string; absolutePath: string }> {
+    const version = this.assetVersion(data);
+    const fileName = `account-${data.accountId}-gw-${data.gameweek}-${version}.png`;
+    const recapsDir = path.join(this.assetsDir, "recaps");
+    const absolutePath = path.join(recapsDir, fileName);
+    const relativePath = `/assets/recaps/${fileName}`;
+
+    fs.mkdirSync(recapsDir, { recursive: true });
+
+    if (!fs.existsSync(absolutePath)) {
+      const png = await this.renderCard(data);
+      await fs.promises.writeFile(absolutePath, png);
+      await this.removeStaleAssets(recapsDir, `account-${data.accountId}-gw-${data.gameweek}-`, fileName);
+    }
+
+    return { relativePath, absolutePath };
   }
 
   async renderCard(data: RecapData): Promise<Buffer> {
@@ -179,6 +206,39 @@ export class RecapCardService {
 </svg>`;
 
     return sharp(Buffer.from(svg)).png().toBuffer();
+  }
+
+  private assetVersion(data: RecapData): string {
+    const payload = [
+      data.accountId,
+      data.managerName,
+      data.teamName,
+      data.gameweek,
+      data.points,
+      data.totalPoints,
+      data.overallRank,
+      data.rankChange,
+      data.bestPlayerName,
+      data.bestPlayerPoints,
+      data.captainName,
+      data.captainPoints,
+      data.hitsCost,
+    ];
+
+    return crypto
+      .createHash('sha1')
+      .update(JSON.stringify(payload))
+      .digest("hex")
+      .slice(0, 12);
+  }
+
+  private async removeStaleAssets(recapsDir: string, prefix: string, keepFileName: string) {
+    const entries = await fs.promises.readdir(recapsDir).catch(() => []);
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith(prefix) && entry !== keepFileName)
+        .map((entry) => fs.promises.unlink(path.join(recapsDir, entry)).catch(() => undefined)),
+    );
   }
 }
 
