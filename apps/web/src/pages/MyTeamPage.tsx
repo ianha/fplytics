@@ -62,8 +62,16 @@ function summarizeAuthError(error: string | null) {
     return "Your saved FPL password is no longer being accepted. Re-enter it below to relink this account.";
   }
 
+  if (error.includes("can no longer be decrypted")) {
+    return "Your saved FPL password can no longer be decrypted on this device. Re-enter it below to relink this account.";
+  }
+
   if (error.includes("FPL request failed (401)") || error.includes("FPL request failed (403)")) {
     return "FPL rejected the authenticated session for this account. Re-enter your credentials and try again.";
+  }
+
+  if (error.includes("Could not resolve") || error.includes("Could not reach")) {
+    return "This device cannot currently reach the FPL login service. Check your DNS, VPN, proxy, or firewall settings, then try again.";
   }
 
   return "This account needs to be relinked before it can sync fresh FPL data.";
@@ -365,6 +373,7 @@ export function MyTeamPage() {
   const [shareGw, setShareGw] = useState<number | null>(null);
   const [transferHorizon, setTransferHorizon] = useState<TransferDecisionHorizon>(3);
   const [transferDecision, setTransferDecision] = useState<TransferDecisionState>({ status: "idle" });
+  const transferDecisionRequestId = useRef(0);
 
   useEffect(() => {
     if (!selectedPick) {
@@ -615,22 +624,22 @@ export function MyTeamPage() {
 
   useEffect(() => {
     const accountId = selectedAccount?.id;
-    const gw = payload?.currentGameweek;
+    const gw = viewGameweek ?? payload?.currentGameweek;
     if (!accountId || !gw) {
       setTransferDecision({ status: "idle" });
       return;
     }
 
-    let cancelled = false;
+    const requestId = ++transferDecisionRequestId.current;
     setTransferDecision({ status: "loading" });
 
     getTransferDecision(accountId, { gw, horizon: transferHorizon })
       .then((response) => {
-        if (cancelled) return;
+        if (transferDecisionRequestId.current !== requestId) return;
         setTransferDecision({ status: "ready", payload: response });
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (transferDecisionRequestId.current !== requestId) return;
         setTransferDecision({
           status: "error",
           message: error instanceof Error ? error.message : String(error),
@@ -638,9 +647,11 @@ export function MyTeamPage() {
       });
 
     return () => {
-      cancelled = true;
+      if (transferDecisionRequestId.current === requestId) {
+        transferDecisionRequestId.current += 1;
+      }
     };
-  }, [selectedAccount?.id, payload?.currentGameweek, transferHorizon]);
+  }, [selectedAccount?.id, viewGameweek, payload?.currentGameweek, transferHorizon]);
   const relinkMessage = summarizeAuthError(selectedAccount?.authError ?? null);
 
   if (state.status === "loading") {
@@ -1182,9 +1193,23 @@ export function MyTeamPage() {
               ) : (
                 <>
                   {(() => {
-                    const recommended = transferDecision.payload.options.find(
-                      (option) => option.id === transferDecision.payload.recommendedOptionId,
-                    ) ?? transferDecision.payload.options[0];
+                    const replayState = transferDecision.payload.replayState ?? "full";
+                    const replayNotes = transferDecision.payload.replayNotes ?? [];
+                    const recommended = transferDecision.payload.recommendedOptionId
+                      ? transferDecision.payload.options.find(
+                          (option) => option.id === transferDecision.payload.recommendedOptionId,
+                        ) ?? transferDecision.payload.options[0]
+                      : null;
+                    const headlineReason = recommended?.reasons[0] ?? null;
+                    const headlineWarning = recommended?.confidence === "close_call"
+                      ? recommended.warnings[0] ?? null
+                      : null;
+                    const replayLabel = replayState === "full"
+                      ? "Live recommendation"
+                      : replayState === "degraded"
+                        ? "Historical replay"
+                        : "Historical replay unavailable";
+                    const replayNote = replayNotes[0] ?? null;
 
                     return (
                       <div className="mb-4 rounded-2xl border border-accent/20 bg-accent/10 p-4">
@@ -1192,19 +1217,55 @@ export function MyTeamPage() {
                           <Sparkles className="h-3.5 w-3.5" />
                           Top Recommendation
                         </div>
+                        <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">
+                          {replayLabel}
+                        </p>
                         <p className="mt-2 text-base font-semibold text-white">
-                          {formatTransferDecisionLabel(recommended.label)}
+                          {recommended ? formatTransferDecisionLabel(recommended.label) : "Unavailable"}
                         </p>
                         <p className="mt-1 text-sm text-white/65">
-                          {recommended.label === "roll"
-                            ? "No single move clearly beats waiting one more week."
-                            : formatTransferSummary(recommended)}
+                          {recommended
+                            ? (
+                              recommended.label === "roll"
+                                ? "No single move clearly beats waiting one more week."
+                                : formatTransferSummary(recommended)
+                            )
+                            : "Historical replay is unavailable for this gameweek."}
                         </p>
+                        {headlineReason && (
+                          <p className="mt-3 text-sm leading-6 text-white/78">
+                            {headlineReason}
+                          </p>
+                        )}
+                        {!headlineReason && replayNote && (
+                          <p className="mt-3 text-sm leading-6 text-white/78">
+                            {replayNote}
+                          </p>
+                        )}
+                        {headlineWarning && (
+                          <p className="mt-2 text-xs leading-5 text-amber-200/85">
+                            {headlineWarning}
+                          </p>
+                        )}
                       </div>
                     );
                   })()}
 
                   <div className="grid gap-3">
+                    {(transferDecision.payload.replayNotes ?? []).length > 0 && (
+                      <div className="rounded-2xl border border-white/8 bg-white/4 p-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/40">
+                          Replay Notes
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          {(transferDecision.payload.replayNotes ?? []).map((note) => (
+                            <p key={note} className="text-sm leading-6 text-white/68">
+                              {note}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {transferDecision.payload.options.map((option) => {
                       const isRecommended =
                         option.id === transferDecision.payload.recommendedOptionId;

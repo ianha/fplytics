@@ -22,12 +22,25 @@ function isAuthenticationError(error: unknown) {
     message.includes("FPL request failed (401)") ||
     message.includes("FPL request failed (403)") ||
     message.includes("no FPL team entry ID") ||
+    message.includes("can no longer be decrypted") ||
     // Node/undici TLS errors that occur when the FPL login server rejects the session
     message.includes("Unsupported state or unable to authenticate data") ||
     message.includes("SSL routines") ||
     message.includes("ECONNRESET") ||
     message.includes("UNABLE_TO_VERIFY_LEAF_SIGNATURE")
   );
+}
+
+function normalizeSyncError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (message.includes("Unsupported state or unable to authenticate data")) {
+    return new Error(
+      "Stored FPL credentials can no longer be decrypted. Re-enter your FPL password to relink this account.",
+    );
+  }
+
+  return error instanceof Error ? error : new Error(message);
 }
 
 function safeRank(value: number | null | undefined) {
@@ -345,14 +358,15 @@ export class MyTeamSyncService {
 
       return { accountId, entryId, syncedGameweeks: picksToSync.length, currentGameweek };
     } catch (error) {
-      if (isAuthenticationError(error)) {
+      const normalizedError = normalizeSyncError(error);
+      if (isAuthenticationError(normalizedError)) {
         this.db
           .prepare(
             `UPDATE my_team_accounts
              SET auth_status = 'relogin_required', auth_error = ?, updated_at = ?
              WHERE id = ?`,
           )
-          .run(error instanceof Error ? error.message : String(error), now(), accountId);
+          .run(normalizedError.message, now(), accountId);
 
         this.db
           .prepare(
@@ -361,10 +375,10 @@ export class MyTeamSyncService {
              ON CONFLICT(account_id) DO UPDATE SET
                last_error = excluded.last_error`,
           )
-          .run(accountId, error instanceof Error ? error.message : String(error));
+          .run(accountId, normalizedError.message);
       }
 
-      throw error;
+      throw normalizedError;
     }
   }
 }

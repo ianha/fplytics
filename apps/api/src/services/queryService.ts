@@ -20,6 +20,7 @@ import type {
   TeamSummary,
   TransferDecisionHorizon,
   TransferDecisionOption,
+  TransferDecisionReplayState,
   TransferDecisionResponse,
 } from "@fpl/contracts";
 import type { AppDatabase } from "../db/database.js";
@@ -67,13 +68,28 @@ type PlayerTransferRow = {
 
 type RecentPlayerStats = {
   playerId: number;
-  avgXg: number;
-  avgXa: number;
-  avgMinutes: number;
-  avgBonus: number;
-  avgXgc: number;
-  avgSaves: number;
-  gwCount: number;
+  recentXg90: number;
+  recentXa90: number;
+  recentXgc90: number;
+  recentBonus90: number;
+  recentSaves90: number;
+  recentYellow90: number;
+  recentRed90: number;
+  recentGoalsConceded90: number;
+  recentAvgMinutes: number;
+  recentStartProbability: number;
+  recentGwCount: number;
+  seasonXg90: number;
+  seasonXa90: number;
+  seasonXgc90: number;
+  seasonBonus90: number;
+  seasonSaves90: number;
+  seasonYellow90: number;
+  seasonRed90: number;
+  seasonGoalsConceded90: number;
+  seasonAvgMinutes: number;
+  seasonStartProbability: number;
+  seasonGwCount: number;
 };
 
 type TransferProjectionPlayerRow = {
@@ -81,10 +97,20 @@ type TransferProjectionPlayerRow = {
   webName: string;
   teamId: number;
   teamShortName: string;
+  imagePath: string | null;
   positionId: number;
   positionName: string;
   nowCost: number;
+  form: number;
+  totalMinutes: number;
+  totalStarts: number;
+  totalExpectedGoals: number;
+  totalExpectedAssists: number;
+  totalExpectedGoalsConceded: number;
+  totalBonus: number;
   status: string;
+  hasHistoricalPrice: number;
+  hasHistoricalTeam: number;
 };
 
 type TeamUpcomingFixture = {
@@ -101,21 +127,66 @@ type PlayerProjection = {
   playerName: string;
   teamId: number;
   teamShortName: string;
+  imagePath: string | null;
   positionId: number;
   positionName: string;
   nowCost: number;
+  form: number;
   status: string;
   minutesProbability: number;
+  startProbability: number;
   nextOpponent: string;
+  nextGameweekDifficulty: number;
   averageDifficulty: number | null;
   perGameweek: number[];
   weightedProjection: number;
   nextGameweekProjection: number;
+  attackingWeightedProjection: number;
+  attackingNextGameweekProjection: number;
+  cleanSheetWeightedProjection: number;
+  hasHistoricalPrice: boolean;
 };
 
 type RankedTransferDecision = {
   option: TransferDecisionOption;
   rankingScore: number;
+};
+
+type HistoricalReplayContext = {
+  replayState: TransferDecisionReplayState;
+  replayNotes: string[];
+  freeTransfers: number;
+};
+
+type PositionPrior = {
+  positionId: number;
+  xg90: number;
+  xa90: number;
+  xgc90: number;
+  bonus90: number;
+  saves90: number;
+  yellow90: number;
+  red90: number;
+  goalsConceded90: number;
+  avgMinutes: number;
+  startProbability: number;
+};
+
+type TeamStrengthSnapshot = {
+  teamId: number;
+  attackStrength: number;
+  defenseWeakness: number;
+};
+
+type ProjectedFixtureScore = {
+  total: number;
+  attacking: number;
+  cleanSheet: number;
+  appearance: number;
+  minutesProbability: number;
+  startProbability: number;
+  expectedGoalsConceded: number;
+  cleanSheetProbability: number;
 };
 
 function mapBoolean(value: number | null | undefined) {
@@ -837,144 +908,24 @@ export class QueryService {
   // ─── xPts ─────────────────────────────────────────────────────────────────
 
   getPlayerXpts(gameweek?: number): PlayerXpts[] {
-    // Points values by position (FPL scoring)
-    const GOAL_POINTS: Record<number, number> = { 1: 6, 2: 6, 3: 5, 4: 4 };
-    const CS_POINTS: Record<number, number>   = { 1: 6, 2: 6, 3: 1, 4: 0 };
-    const ASSIST_POINTS = 3;
-    const APPEARANCE_POINTS_PER_90 = 2;
-    const SAVE_POINTS_PER_3 = 1;
+    const currentGw = this.db
+      .prepare(`SELECT id FROM gameweeks WHERE is_current = 1 ORDER BY id LIMIT 1`)
+      .get() as { id: number } | undefined;
+    const startingGameweek = gameweek ?? currentGw?.id ?? 1;
+    const projections = this.getPlayerProjectionMap(startingGameweek, 1);
 
-    // Use recent player history for form stats (last 5 GWs)
-    type HistoryAgg = {
-      playerId: number; avgXg: number; avgXa: number;
-      avgMinutes: number; avgBonus: number; avgXgc: number; avgSaves: number;
-      gwCount: number;
-    };
-    const historyRows = this.db.prepare(`
-      SELECT
-        ph.player_id AS playerId,
-        AVG(ph.expected_goals) AS avgXg,
-        AVG(ph.expected_assists) AS avgXa,
-        AVG(ph.minutes) AS avgMinutes,
-        AVG(ph.bonus) AS avgBonus,
-        AVG(ph.expected_goals_conceded) AS avgXgc,
-        AVG(ph.saves) AS avgSaves,
-        COUNT(*) AS gwCount
-      FROM player_history ph
-      WHERE ph.round IN (
-        SELECT DISTINCT round FROM player_history ORDER BY round DESC LIMIT 5
-      )
-      GROUP BY ph.player_id
-    `).all() as HistoryAgg[];
-    const histMap = new Map(historyRows.map((r) => [r.playerId, r]));
-
-    // Get FDR data to compute fixture difficulty multiplier
-    const fdrRows = this.getFdrData();
-    const fdrMap = new Map(fdrRows.map((r) => [r.teamId, r]));
-
-    // Get all players with their team, position, and next fixture
-    type PlayerRow = {
-      id: number; webName: string; teamId: number; teamShortName: string;
-      imagePath: string | null; positionId: number; positionName: string; form: number;
-    };
-    const players = this.db.prepare(`
-      SELECT p.id, p.web_name AS webName, p.team_id AS teamId,
-             t.short_name AS teamShortName,
-             p.image_path AS imagePath,
-             p.position_id AS positionId, pos.name AS positionName,
-             p.form
-      FROM players p
-      JOIN teams t ON t.id = p.team_id
-      JOIN positions pos ON pos.id = p.position_id
-      WHERE p.status != 'u'
-      ORDER BY p.id
-    `).all() as PlayerRow[];
-
-    // Get next fixture per team (for specified GW or very next one)
-    type NextFixtureRow = {
-      teamId: number; opponentId: number; opponentShort: string;
-      isHome: number; gameweek: number;
-    };
-    const gwFilter = gameweek ? `AND f.event_id = ${gameweek}` : "";
-    const nextFixtures = this.db.prepare(`
-      SELECT
-        t.id AS teamId,
-        opp.id AS opponentId,
-        opp.short_name AS opponentShort,
-        CASE WHEN f.team_h = t.id THEN 1 ELSE 0 END AS isHome,
-        f.event_id AS gameweek
-      FROM teams t
-      JOIN fixtures f ON (f.team_h = t.id OR f.team_a = t.id)
-      JOIN teams opp ON opp.id = CASE WHEN f.team_h = t.id THEN f.team_a ELSE f.team_h END
-      WHERE f.finished = 0
-        AND f.event_id IS NOT NULL
-        ${gwFilter}
-      ORDER BY t.id, f.event_id
-    `).all() as NextFixtureRow[];
-
-    // Pick first upcoming fixture per team
-    const nextFixtureMap = new Map<number, NextFixtureRow>();
-    for (const f of nextFixtures) {
-      if (!nextFixtureMap.has(f.teamId)) nextFixtureMap.set(f.teamId, f);
-    }
-
-    return players.map((p) => {
-      const hist = histMap.get(p.id);
-      const nextFix = nextFixtureMap.get(p.teamId);
-      const fdrTeam = nextFix ? fdrMap.get(p.teamId) : undefined;
-      const fixture = fdrTeam?.fixtures.find((f) => f.opponentId === nextFix?.opponentId);
-      const difficulty = fixture?.difficulty ?? (nextFix ? 3 : 0);
-
-      if (!hist || hist.gwCount < 2 || !nextFix) {
-        return {
-          playerId: p.id,
-          playerName: p.webName,
-          teamShortName: p.teamShortName,
-          imagePath: p.imagePath,
-          position: p.positionName,
-          nextOpponent: nextFix?.opponentShort ?? "BGW",
-          difficulty,
-          xpts: null,
-          form: p.form,
-          minutesProbability: 0,
-        };
-      }
-
-      const minutesProbability = Math.min(1, (hist.avgMinutes ?? 0) / 90);
-      const posId = p.positionId;
-      const goalPts = GOAL_POINTS[posId] ?? 4;
-      const csPts = CS_POINTS[posId] ?? 0;
-
-      // Fixture difficulty multiplier: easy=1.2, hard=0.75
-      const diffMultipliers: Record<number, number> = { 1: 1.2, 2: 1.1, 3: 1.0, 4: 0.85, 5: 0.75 };
-      const diffMult = diffMultipliers[difficulty] ?? 1.0;
-
-      const xg = (hist.avgXg ?? 0) * goalPts;
-      const xa = (hist.avgXa ?? 0) * ASSIST_POINTS;
-      const csProb = csPts > 0 ? Math.max(0, 1 - (hist.avgXgc ?? 0)) : 0;
-      const appearance = minutesProbability * APPEARANCE_POINTS_PER_90;
-      const bonus = hist.avgBonus ?? 0;
-      const saves = posId === 1 ? ((hist.avgSaves ?? 0) / 3) * SAVE_POINTS_PER_3 : 0;
-
-      const rawXpts =
-        (xg + xa + saves) * minutesProbability +
-        csProb * csPts +
-        appearance +
-        bonus;
-
-      return {
-        playerId: p.id,
-        playerName: p.webName,
-        teamShortName: p.teamShortName,
-        imagePath: p.imagePath,
-        position: p.positionName,
-        nextOpponent: nextFix.opponentShort,
-        difficulty,
-        xpts: Math.round(rawXpts * 10) / 10,
-        form: p.form,
-        minutesProbability,
-      };
-    });
+    return [...projections.values()].map((projection) => ({
+      playerId: projection.playerId,
+      playerName: projection.playerName,
+      teamShortName: projection.teamShortName,
+      imagePath: projection.imagePath,
+      position: projection.positionName,
+      nextOpponent: projection.nextOpponent,
+      difficulty: projection.nextGameweekDifficulty,
+      xpts: projection.nextOpponent === "BGW" ? null : projection.nextGameweekProjection,
+      form: projection.form,
+      minutesProbability: projection.minutesProbability,
+    }));
   }
 
   getCaptainRecommendations(accountId: number, gameweek: number): CaptainRecommendation[] {
@@ -1025,15 +976,28 @@ export class QueryService {
     }
 
     const gameweek = input.gw ?? myTeam.currentGameweek;
-    const historyRow = myTeam.history.find((row) => row.gameweek === gameweek) ?? myTeam.history[0];
-    const picksResponse = this.getMyTeamPicksForGameweek(accountId, gameweek);
-    if (picksResponse.picks.length === 0 || !historyRow) {
+    const historyRow = myTeam.history.find((row) => row.gameweek === gameweek);
+    if (!historyRow) {
       return null;
+    }
+    const picksResponse = this.getMyTeamPicksForGameweek(accountId, gameweek);
+    const isHistoricalReplay = gameweek !== myTeam.currentGameweek;
+    const historicalReplay = this.getHistoricalReplayContext(isHistoricalReplay, myTeam.freeTransfers);
+    if (picksResponse.picks.length === 0) {
+      return this.createUnavailableTransferDecision(
+        gameweek,
+        historyRow.bank,
+        input.horizon,
+        historicalReplay,
+        "Historical replay is unavailable for this gameweek because stored squad context is incomplete.",
+      );
     }
 
     const bank = historyRow.bank;
     const horizon = input.horizon;
-    const projections = this.getPlayerProjectionMap(gameweek, horizon);
+    const projections = isHistoricalReplay
+      ? this.getHistoricalPlayerProjectionMap(gameweek, horizon)
+      : this.getPlayerProjectionMap(gameweek, horizon);
     const ownedPlayerIds = new Set(picksResponse.picks.map((pick) => pick.player.id));
 
     const rollOption = this.createRollDecisionOption(bank, horizon);
@@ -1043,20 +1007,68 @@ export class QueryService {
       ownedPlayerIds,
       bank,
       horizon,
+      { historicalReplay: isHistoricalReplay, gameweek },
     );
 
-    const options = [rollOption, ...(bestOneFt ? [bestOneFt.option] : [])];
-    const recommended = bestOneFt && bestOneFt.rankingScore > 0
+    const surfacedBestOneFt = bestOneFt && this.shouldSurfaceTransferOption(bestOneFt.option)
+      ? bestOneFt.option
+      : null;
+    const options = [rollOption, ...(surfacedBestOneFt ? [surfacedBestOneFt] : [])];
+    const recommended = bestOneFt && this.shouldRecommendTransfer(bestOneFt.option, bestOneFt.rankingScore)
       ? bestOneFt.option
       : rollOption;
 
     return {
       gameweek,
-      freeTransfers: myTeam.freeTransfers,
+      freeTransfers: historicalReplay.freeTransfers,
       bank,
       horizon,
+      replayState: historicalReplay.replayState,
+      replayNotes: historicalReplay.replayNotes,
       recommendedOptionId: recommended.id,
       options,
+    };
+  }
+
+  private getHistoricalReplayContext(
+    isHistoricalReplay: boolean,
+    currentFreeTransfers: number,
+  ): HistoricalReplayContext {
+    if (!isHistoricalReplay) {
+      return {
+        replayState: "full",
+        replayNotes: [],
+        freeTransfers: currentFreeTransfers,
+      };
+    }
+
+    return {
+      replayState: "degraded",
+      replayNotes: [
+        "Historical replay uses stored pre-deadline squad and price context.",
+        "Historical free transfers are inferred conservatively as 1.",
+        "Historical availability and future fixture snapshots are partial, so replay confidence is reduced.",
+      ],
+      freeTransfers: 1,
+    };
+  }
+
+  private createUnavailableTransferDecision(
+    gameweek: number,
+    bank: number,
+    horizon: TransferDecisionHorizon,
+    replay: HistoricalReplayContext,
+    note: string,
+  ): TransferDecisionResponse {
+    return {
+      gameweek,
+      freeTransfers: replay.freeTransfers,
+      bank,
+      horizon,
+      replayState: "unavailable",
+      replayNotes: [...replay.replayNotes, note],
+      recommendedOptionId: null,
+      options: [],
     };
   }
 
@@ -1082,28 +1094,83 @@ export class QueryService {
     };
   }
 
+  private shouldRecommendTransfer(option: TransferDecisionOption, rankingScore: number) {
+    if (rankingScore <= 0 || option.label === "roll") {
+      return false;
+    }
+
+    const transfer = option.transfers[0];
+    if (
+      transfer?.position === "Goalkeeper" &&
+      transfer.priceDelta <= -10 &&
+      option.projectedGain < 4
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private shouldSurfaceTransferOption(option: TransferDecisionOption) {
+    if (option.label === "roll") {
+      return true;
+    }
+
+    const transfer = option.transfers[0];
+    if (!transfer) {
+      return false;
+    }
+
+    if (option.projectedGain <= 0 && option.nextGwGain <= 0) {
+      return false;
+    }
+
+    if (
+      transfer.position === "Goalkeeper" &&
+      transfer.priceDelta <= -10 &&
+      option.projectedGain < 4
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
   private createBestOneTransferOption(
     picks: MyTeamPick[],
     projections: Map<number, PlayerProjection>,
     ownedPlayerIds: Set<number>,
     bank: number,
     horizon: TransferDecisionHorizon,
+    options?: { historicalReplay?: boolean; gameweek?: number },
   ): RankedTransferDecision | null {
     let bestOption: RankedTransferDecision | null = null;
     let bestScore = Number.NEGATIVE_INFINITY;
 
-    for (const pick of picks) {
+    const rankedPicks = [...picks].sort((a, b) => {
+      const projectionA = projections.get(a.player.id);
+      const projectionB = projections.get(b.player.id);
+      return this.getPickUrgencyScore(b, projectionB) - this.getPickUrgencyScore(a, projectionA);
+    });
+
+    for (const pick of rankedPicks) {
       const outgoingProjection = projections.get(pick.player.id);
       if (!outgoingProjection) continue;
 
-      const sellValue = pick.sellingPrice ?? pick.player.nowCost;
-      const pickWeight = this.getPickTransferWeight(pick);
+      const sellValue = options?.historicalReplay
+        ? this.getHistoricalSellValue(
+            pick.player.id,
+            options.gameweek ?? 1,
+            pick.sellingPrice ?? pick.purchasePrice ?? pick.player.nowCost,
+          )
+        : (pick.sellingPrice ?? pick.player.nowCost);
       const affordableBudget = bank + sellValue;
       const candidates = [...projections.values()]
         .filter((candidate) => (
           candidate.positionId === pick.player.positionId &&
           candidate.playerId !== pick.player.id &&
           !ownedPlayerIds.has(candidate.playerId) &&
+          (!options?.historicalReplay || candidate.hasHistoricalPrice) &&
           candidate.nowCost <= affordableBudget
         ))
         .sort((a, b) => (
@@ -1111,7 +1178,7 @@ export class QueryService {
           a.nowCost - b.nowCost ||
           a.playerName.localeCompare(b.playerName)
         ))
-        .slice(0, 12);
+        .slice(0, this.getCandidateLimitForPick(pick));
 
       for (const incomingProjection of candidates) {
         const projectedGain = this.roundToTenth(
@@ -1153,11 +1220,18 @@ export class QueryService {
           warnings: this.buildTransferWarnings(
             pick,
             projectedGain,
+            nextGwGain,
             outgoingProjection,
             incomingProjection,
+            incomingProjection.nowCost - sellValue,
           ),
         };
-        const optionScore = this.getDecisionOptionScore(option, pickWeight);
+        const optionScore = this.getDecisionOptionScore(
+          option,
+          pick,
+          outgoingProjection,
+          incomingProjection,
+        );
 
         if (optionScore > bestScore) {
           bestScore = optionScore;
@@ -1172,12 +1246,32 @@ export class QueryService {
     return bestOption;
   }
 
-  private getDecisionOptionScore(option: TransferDecisionOption, pickWeight = 1): number {
+  private getDecisionOptionScore(
+    option: TransferDecisionOption,
+    pick: MyTeamPick,
+    outgoingProjection: PlayerProjection,
+    incomingProjection: PlayerProjection,
+  ): number {
     if (option.label === "roll") {
       return 0;
     }
 
-    let score = (option.projectedGain * pickWeight) + (option.nextGwGain * 0.35 * pickWeight);
+    const pickWeight = this.getPickTransferWeight(pick);
+    const attackingGain = incomingProjection.attackingWeightedProjection - outgoingProjection.attackingWeightedProjection;
+    const nextGwAttackingGain =
+      incomingProjection.attackingNextGameweekProjection - outgoingProjection.attackingNextGameweekProjection;
+    const isAttackingSlot = pick.player.positionId === 3 || pick.player.positionId === 4;
+    const isLowImpactSlot = pick.player.positionId === 1 || pick.player.positionId === 2;
+    const closeCallBand = option.projectedGain < 1.2 ? 1 : 0;
+    const priceDelta = option.transfers[0]?.priceDelta ?? 0;
+    const isCashGenerationMove = isLowImpactSlot && priceDelta <= -10;
+    const isGoalkeeperCashGenerationMove = pick.player.positionId === 1 && priceDelta <= -10;
+
+    let score =
+      (option.projectedGain * pickWeight) +
+      (option.nextGwGain * 0.45 * pickWeight) +
+      (attackingGain * 0.35) +
+      (nextGwAttackingGain * 0.25);
 
     if (option.projectedGain < 0.6) {
       score -= 0.45;
@@ -1191,11 +1285,44 @@ export class QueryService {
       score += Math.min(option.remainingBank, 20) * 0.005;
     }
 
+    if (closeCallBand) {
+      if (isAttackingSlot) score += 0.18;
+      if (pick.role === "starter") score += 0.12;
+      if (isLowImpactSlot) score -= 0.2;
+      if (pick.role !== "starter") score -= 0.18;
+    }
+
+    if (pick.player.positionId === 1 && option.projectedGain < 1.4) {
+      score -= 0.25;
+    }
+
+    if (pick.player.positionId === 1 && option.projectedGain < 1.8) {
+      score -= 0.2;
+    }
+
+    if (pick.player.positionId === 1 && option.nextGwGain < 0.8) {
+      score -= 0.15;
+    }
+
+    if (isGoalkeeperCashGenerationMove && option.projectedGain < 4) {
+      score -= 1.4;
+    }
+
+    if (pick.player.positionId === 2 && option.projectedGain < 1.1) {
+      score -= 0.12;
+    }
+
+    if (isCashGenerationMove && option.projectedGain < 1.5) {
+      score -= 0.45;
+    }
+
     for (const warning of option.warnings) {
       if (warning.includes("bench depth")) score -= 0.2;
       if (warning.includes("availability") || warning.includes("minutes")) score -= 0.2;
       if (warning.includes("Close to rolling")) score -= 0.15;
       if (warning.includes("blank next gameweek")) score -= 0.35;
+      if (warning.includes("low-ceiling")) score -= 0.2;
+      if (warning.includes("frees cash")) score -= 0.25;
     }
 
     return this.roundToTenth(score);
@@ -1235,10 +1362,21 @@ export class QueryService {
       reasons.push("Improves a likely starter rather than just your bench.");
     }
 
+    const attackingGain = this.roundToTenth(
+      incomingProjection.attackingWeightedProjection - outgoingProjection.attackingWeightedProjection,
+    );
+    if ((pick.player.positionId === 3 || pick.player.positionId === 4) && attackingGain >= 0.4) {
+      reasons.push(`${incomingProjection.playerName} adds more goal involvement upside across the horizon.`);
+    }
+
     if (nextGwGain >= 0.4) {
       reasons.push(
         `${incomingProjection.playerName} improves the immediate outlook by ${nextGwGain.toFixed(1)} xPts next GW.`,
       );
+    }
+
+    if (incomingProjection.minutesProbability - outgoingProjection.minutesProbability >= 0.1) {
+      reasons.push(`${incomingProjection.playerName} looks likelier to reach 60+ minutes consistently.`);
     }
 
     if (
@@ -1261,8 +1399,10 @@ export class QueryService {
   private buildTransferWarnings(
     pick: MyTeamPick,
     projectedGain: number,
+    nextGwGain: number,
     outgoingProjection: PlayerProjection,
     incomingProjection: PlayerProjection,
+    priceDelta: number,
   ) {
     const warnings: string[] = [];
 
@@ -1274,6 +1414,16 @@ export class QueryService {
       warnings.push("Mostly improves bench depth rather than the starting XI.");
     }
 
+    if ((pick.player.positionId === 1 || pick.player.positionId === 2) && projectedGain < 1.2) {
+      warnings.push("Still a relatively low-ceiling position move unless the gain grows.");
+    }
+
+    if (pick.player.positionId === 1 && priceDelta <= -10 && projectedGain < 4) {
+      warnings.push("Mostly frees cash from a low-ceiling goalkeeper slot rather than adding enough upside.");
+    } else if ((pick.player.positionId === 1 || pick.player.positionId === 2) && priceDelta <= -10 && projectedGain < 1.5) {
+      warnings.push("Mostly frees cash from a low-ceiling slot rather than adding meaningful upside.");
+    }
+
     if (incomingProjection.minutesProbability < 0.75 || incomingProjection.status !== "a") {
       warnings.push("Incoming player carries some availability or minutes risk.");
     }
@@ -1282,7 +1432,56 @@ export class QueryService {
       warnings.push("Incoming player has a blank next gameweek.");
     }
 
+    if (pick.role === "starter" && nextGwGain < 0.2 && projectedGain < 0.9) {
+      warnings.push("Limited immediate impact for a likely starter this week.");
+    }
+
     return warnings;
+  }
+
+  private getPickUrgencyScore(
+    pick: MyTeamPick,
+    projection: PlayerProjection | undefined,
+  ) {
+    if (!projection) return 0;
+
+    let score = pick.role === "starter" ? 1.2 : 0.45;
+
+    if (pick.player.positionId === 3 || pick.player.positionId === 4) {
+      score += 0.2;
+    }
+
+    if (pick.player.positionId === 1 && pick.role !== "starter") {
+      score -= 0.45;
+    }
+
+    score += Math.max(0, 5 - projection.nextGameweekProjection) * 0.12;
+    score += Math.max(0, 3 - projection.attackingNextGameweekProjection) * (
+      pick.player.positionId === 3 || pick.player.positionId === 4 ? 0.1 : 0.02
+    );
+
+    return this.roundToTenth(score);
+  }
+
+  private getCandidateLimitForPick(pick: MyTeamPick) {
+    if (pick.role === "starter") {
+      return pick.player.positionId === 1 ? 6 : 12;
+    }
+
+    if (pick.player.positionId === 1) {
+      return 2;
+    }
+
+    switch (pick.benchOrder) {
+      case 1:
+        return 6;
+      case 2:
+        return 4;
+      case 3:
+        return 2;
+      default:
+        return 3;
+    }
   }
 
   private getPickTransferWeight(pick: MyTeamPick) {
@@ -1306,6 +1505,24 @@ export class QueryService {
     }
   }
 
+  private getHistoricalSellValue(
+    playerId: number,
+    gameweek: number,
+    fallback: number,
+  ) {
+    const row = this.db.prepare(
+      `SELECT value
+       FROM player_history
+       WHERE player_id = ?
+         AND round < ?
+         AND value IS NOT NULL
+       ORDER BY round DESC, COALESCE(kickoff_time, '') DESC, rowid DESC
+       LIMIT 1`,
+    ).get(playerId, gameweek) as { value: number | null } | undefined;
+
+    return row?.value ?? fallback;
+  }
+
   private getPlayerProjectionMap(
     startingGameweek: number,
     horizon: TransferDecisionHorizon,
@@ -1313,6 +1530,8 @@ export class QueryService {
     const weights = this.getProjectionWeights(horizon);
     const targetGameweeks = weights.map((_, index) => startingGameweek + index);
     const recentStats = this.getRecentPlayerStats();
+    const positionPriors = this.getPositionPriors();
+    const teamStrengths = this.getTeamStrengths();
     const teamFixtures = this.getUpcomingTeamFixtures(
       startingGameweek,
       targetGameweeks[targetGameweeks.length - 1] ?? startingGameweek,
@@ -1320,7 +1539,11 @@ export class QueryService {
 
     const players = this.db.prepare(
       `SELECT p.id, p.web_name AS webName, p.team_id AS teamId, t.short_name AS teamShortName,
-              p.position_id AS positionId, pos.name AS positionName, p.now_cost AS nowCost, p.status
+              p.image_path AS imagePath, p.position_id AS positionId, pos.name AS positionName,
+              p.now_cost AS nowCost, p.form, p.minutes AS totalMinutes, p.starts AS totalStarts,
+              p.expected_goals AS totalExpectedGoals, p.expected_assists AS totalExpectedAssists,
+              p.expected_goals_conceded AS totalExpectedGoalsConceded, p.bonus AS totalBonus, p.status,
+              1 AS hasHistoricalPrice, 1 AS hasHistoricalTeam
        FROM players p
        JOIN teams t ON t.id = p.team_id
        JOIN positions pos ON pos.id = p.position_id
@@ -1330,21 +1553,64 @@ export class QueryService {
 
     return new Map(players.map((player) => {
       const stats = recentStats.get(player.id);
-      const minutesProbability = Math.min(1, (stats?.avgMinutes ?? 0) / 90);
+      const prior = positionPriors.get(player.positionId);
       const fixturesByGw = teamFixtures.get(player.teamId) ?? new Map<number, TeamUpcomingFixture[]>();
       const perGameweek = targetGameweeks.map((gameweek, index) => {
         const fixtures = fixturesByGw.get(gameweek) ?? [];
         const total = fixtures.reduce((sum, fixture) => {
-          return sum + this.projectFixturePoints(player.positionId, player.status, stats, fixture.isHome, fixture.difficulty);
+          const projected = this.projectFixturePoints(
+            player,
+            stats,
+            prior,
+            fixture,
+            teamStrengths,
+          );
+          return sum + (projected.total * weights[index]);
         }, 0);
-        return this.roundToTenth(total * weights[index]);
+        return this.roundToTenth(total);
+      });
+      const attackingPerGameweek = targetGameweeks.map((gameweek, index) => {
+        const fixtures = fixturesByGw.get(gameweek) ?? [];
+        const total = fixtures.reduce((sum, fixture) => {
+          const projected = this.projectFixturePoints(
+            player,
+            stats,
+            prior,
+            fixture,
+            teamStrengths,
+          );
+          return sum + (projected.attacking * weights[index]);
+        }, 0);
+        return this.roundToTenth(total);
+      });
+      const cleanSheetPerGameweek = targetGameweeks.map((gameweek, index) => {
+        const fixtures = fixturesByGw.get(gameweek) ?? [];
+        const total = fixtures.reduce((sum, fixture) => {
+          const projected = this.projectFixturePoints(
+            player,
+            stats,
+            prior,
+            fixture,
+            teamStrengths,
+          );
+          return sum + (projected.cleanSheet * weights[index]);
+        }, 0);
+        return this.roundToTenth(total);
       });
 
       const nextGameweekFixtures = fixturesByGw.get(startingGameweek) ?? [];
+      const nextFixtureScores = nextGameweekFixtures.map((fixture) => this.projectFixturePoints(
+        player,
+        stats,
+        prior,
+        fixture,
+        teamStrengths,
+      ));
       const nextGameweekProjection = this.roundToTenth(
-        nextGameweekFixtures.reduce((sum, fixture) => (
-          sum + this.projectFixturePoints(player.positionId, player.status, stats, fixture.isHome, fixture.difficulty)
-        ), 0),
+        nextFixtureScores.reduce((sum, fixture) => sum + fixture.total, 0),
+      );
+      const nextGameweekAttackingProjection = this.roundToTenth(
+        nextFixtureScores.reduce((sum, fixture) => sum + fixture.attacking, 0),
       );
       const allFixtures = targetGameweeks.flatMap((gameweek) => fixturesByGw.get(gameweek) ?? []);
       const averageDifficulty = allFixtures.length > 0
@@ -1352,27 +1618,234 @@ export class QueryService {
             allFixtures.reduce((sum, fixture) => sum + fixture.difficulty, 0) / allFixtures.length,
           )
         : null;
+      const nextGameweekDifficulty = nextGameweekFixtures.length > 0
+        ? Math.round(
+            nextGameweekFixtures.reduce((sum, fixture) => sum + fixture.difficulty, 0) / nextGameweekFixtures.length,
+          ) as PlayerProjection["nextGameweekDifficulty"]
+        : 0;
       const nextOpponent = nextGameweekFixtures.length > 0
         ? nextGameweekFixtures
           .map((fixture) => `${fixture.opponentShort}${fixture.isHome ? " (H)" : " (A)"}`)
           .join(", ")
         : "BGW";
+      const minutesProbability = nextFixtureScores.length > 0
+        ? this.roundToTenth(
+            nextFixtureScores.reduce((sum, fixture) => sum + fixture.minutesProbability, 0) / nextFixtureScores.length,
+          )
+        : 0;
+      const startProbability = nextFixtureScores.length > 0
+        ? this.roundToTenth(
+            nextFixtureScores.reduce((sum, fixture) => sum + fixture.startProbability, 0) / nextFixtureScores.length,
+          )
+        : 0;
 
       return [player.id, {
         playerId: player.id,
         playerName: player.webName,
         teamId: player.teamId,
         teamShortName: player.teamShortName,
+        imagePath: player.imagePath,
         positionId: player.positionId,
         positionName: player.positionName,
         nowCost: player.nowCost,
+        form: player.form,
         status: player.status,
         minutesProbability,
+        startProbability,
         nextOpponent,
+        nextGameweekDifficulty,
         averageDifficulty,
         perGameweek,
         weightedProjection: this.roundToTenth(perGameweek.reduce((sum, score) => sum + score, 0)),
         nextGameweekProjection,
+        attackingWeightedProjection: this.roundToTenth(attackingPerGameweek.reduce((sum, score) => sum + score, 0)),
+        attackingNextGameweekProjection: nextGameweekAttackingProjection,
+        cleanSheetWeightedProjection: this.roundToTenth(cleanSheetPerGameweek.reduce((sum, score) => sum + score, 0)),
+        hasHistoricalPrice: true,
+      }];
+    }));
+  }
+
+  private getHistoricalPlayerProjectionMap(
+    startingGameweek: number,
+    horizon: TransferDecisionHorizon,
+  ): Map<number, PlayerProjection> {
+    const weights = this.getProjectionWeights(horizon);
+    const targetGameweeks = weights.map((_, index) => startingGameweek + index);
+    const recentStats = this.getRecentPlayerStats(startingGameweek);
+    const positionPriors = this.getPositionPriors(startingGameweek);
+    const teamStrengths = this.getTeamStrengths(startingGameweek);
+    const teamFixtures = this.getUpcomingTeamFixtures(
+      startingGameweek,
+      targetGameweeks[targetGameweeks.length - 1] ?? startingGameweek,
+      true,
+    );
+
+    const players = this.db.prepare(
+      `WITH latest_history AS (
+         SELECT
+           ph.player_id AS playerId,
+           ph.team_id AS teamId,
+           ph.value AS historicalValue,
+           ROW_NUMBER() OVER (
+             PARTITION BY ph.player_id
+             ORDER BY ph.round DESC, COALESCE(ph.kickoff_time, '') DESC, ph.rowid DESC
+           ) AS rn
+         FROM player_history ph
+         WHERE ph.round < ?
+       ),
+       historical_totals AS (
+         SELECT
+           ph.player_id AS playerId,
+           SUM(ph.minutes) AS totalMinutes,
+           SUM(ph.starts) AS totalStarts,
+           SUM(ph.expected_goals) AS totalExpectedGoals,
+           SUM(ph.expected_assists) AS totalExpectedAssists,
+           SUM(ph.expected_goals_conceded) AS totalExpectedGoalsConceded,
+           SUM(ph.bonus) AS totalBonus
+         FROM player_history ph
+         WHERE ph.round < ?
+         GROUP BY ph.player_id
+       )
+       SELECT
+         p.id,
+         p.web_name AS webName,
+         COALESCE(lh.teamId, p.team_id) AS teamId,
+         t.short_name AS teamShortName,
+         p.image_path AS imagePath,
+         p.position_id AS positionId,
+         pos.name AS positionName,
+         COALESCE(lh.historicalValue, p.now_cost) AS nowCost,
+         0 AS form,
+         COALESCE(ht.totalMinutes, 0) AS totalMinutes,
+         COALESCE(ht.totalStarts, 0) AS totalStarts,
+         COALESCE(ht.totalExpectedGoals, 0) AS totalExpectedGoals,
+         COALESCE(ht.totalExpectedAssists, 0) AS totalExpectedAssists,
+         COALESCE(ht.totalExpectedGoalsConceded, 0) AS totalExpectedGoalsConceded,
+         COALESCE(ht.totalBonus, 0) AS totalBonus,
+         'a' AS status,
+         CASE WHEN lh.historicalValue IS NOT NULL THEN 1 ELSE 0 END AS hasHistoricalPrice,
+         CASE WHEN lh.teamId IS NOT NULL THEN 1 ELSE 0 END AS hasHistoricalTeam
+       FROM players p
+       LEFT JOIN latest_history lh ON lh.playerId = p.id AND lh.rn = 1
+       JOIN teams t ON t.id = COALESCE(lh.teamId, p.team_id)
+       JOIN positions pos ON pos.id = p.position_id
+       LEFT JOIN historical_totals ht ON ht.playerId = p.id
+       WHERE p.status != 'u'
+       ORDER BY p.id`,
+    ).all(startingGameweek, startingGameweek) as TransferProjectionPlayerRow[];
+
+    return new Map(players.map((player) => {
+      const stats = recentStats.get(player.id);
+      const prior = positionPriors.get(player.positionId);
+      const fixturesByGw = teamFixtures.get(player.teamId) ?? new Map<number, TeamUpcomingFixture[]>();
+      const perGameweek = targetGameweeks.map((gameweek, index) => {
+        const fixtures = fixturesByGw.get(gameweek) ?? [];
+        const total = fixtures.reduce((sum, fixture) => {
+          const projected = this.projectFixturePoints(
+            player,
+            stats,
+            prior,
+            fixture,
+            teamStrengths,
+          );
+          return sum + (projected.total * weights[index]);
+        }, 0);
+        return this.roundToTenth(total);
+      });
+      const attackingPerGameweek = targetGameweeks.map((gameweek, index) => {
+        const fixtures = fixturesByGw.get(gameweek) ?? [];
+        const total = fixtures.reduce((sum, fixture) => {
+          const projected = this.projectFixturePoints(
+            player,
+            stats,
+            prior,
+            fixture,
+            teamStrengths,
+          );
+          return sum + (projected.attacking * weights[index]);
+        }, 0);
+        return this.roundToTenth(total);
+      });
+      const cleanSheetPerGameweek = targetGameweeks.map((gameweek, index) => {
+        const fixtures = fixturesByGw.get(gameweek) ?? [];
+        const total = fixtures.reduce((sum, fixture) => {
+          const projected = this.projectFixturePoints(
+            player,
+            stats,
+            prior,
+            fixture,
+            teamStrengths,
+          );
+          return sum + (projected.cleanSheet * weights[index]);
+        }, 0);
+        return this.roundToTenth(total);
+      });
+
+      const nextGameweekFixtures = fixturesByGw.get(startingGameweek) ?? [];
+      const nextFixtureScores = nextGameweekFixtures.map((fixture) => this.projectFixturePoints(
+        player,
+        stats,
+        prior,
+        fixture,
+        teamStrengths,
+      ));
+      const nextGameweekProjection = this.roundToTenth(
+        nextFixtureScores.reduce((sum, fixture) => sum + fixture.total, 0),
+      );
+      const nextGameweekAttackingProjection = this.roundToTenth(
+        nextFixtureScores.reduce((sum, fixture) => sum + fixture.attacking, 0),
+      );
+      const allFixtures = targetGameweeks.flatMap((gameweek) => fixturesByGw.get(gameweek) ?? []);
+      const averageDifficulty = allFixtures.length > 0
+        ? this.roundToTenth(
+            allFixtures.reduce((sum, fixture) => sum + fixture.difficulty, 0) / allFixtures.length,
+          )
+        : null;
+      const nextGameweekDifficulty = nextGameweekFixtures.length > 0
+        ? Math.round(
+            nextGameweekFixtures.reduce((sum, fixture) => sum + fixture.difficulty, 0) / nextGameweekFixtures.length,
+          ) as PlayerProjection["nextGameweekDifficulty"]
+        : 0;
+      const nextOpponent = nextGameweekFixtures.length > 0
+        ? nextGameweekFixtures
+          .map((fixture) => `${fixture.opponentShort}${fixture.isHome ? " (H)" : " (A)"}`)
+          .join(", ")
+        : "BGW";
+      const minutesProbability = nextFixtureScores.length > 0
+        ? this.roundToTenth(
+            nextFixtureScores.reduce((sum, fixture) => sum + fixture.minutesProbability, 0) / nextFixtureScores.length,
+          )
+        : 0;
+      const startProbability = nextFixtureScores.length > 0
+        ? this.roundToTenth(
+            nextFixtureScores.reduce((sum, fixture) => sum + fixture.startProbability, 0) / nextFixtureScores.length,
+          )
+        : 0;
+
+      return [player.id, {
+        playerId: player.id,
+        playerName: player.webName,
+        teamId: player.teamId,
+        teamShortName: player.teamShortName,
+        imagePath: player.imagePath,
+        positionId: player.positionId,
+        positionName: player.positionName,
+        nowCost: player.nowCost,
+        form: 0,
+        status: "a",
+        minutesProbability,
+        startProbability,
+        nextOpponent,
+        nextGameweekDifficulty,
+        averageDifficulty,
+        perGameweek,
+        weightedProjection: this.roundToTenth(perGameweek.reduce((sum, score) => sum + score, 0)),
+        nextGameweekProjection,
+        attackingWeightedProjection: this.roundToTenth(attackingPerGameweek.reduce((sum, score) => sum + score, 0)),
+        attackingNextGameweekProjection: nextGameweekAttackingProjection,
+        cleanSheetWeightedProjection: this.roundToTenth(cleanSheetPerGameweek.reduce((sum, score) => sum + score, 0)),
+        hasHistoricalPrice: Boolean(player.hasHistoricalPrice),
       }];
     }));
   }
@@ -1390,31 +1863,78 @@ export class QueryService {
     }
   }
 
-  private getRecentPlayerStats() {
+  private getRecentPlayerStats(cutoffRoundExclusive?: number) {
+    const recentRoundFilter = cutoffRoundExclusive ? "WHERE round < ?" : "";
+    const mainRoundFilter = cutoffRoundExclusive ? "WHERE ph.round < ?" : "";
     const rows = this.db.prepare(
       `SELECT
          ph.player_id AS playerId,
-         AVG(ph.expected_goals) AS avgXg,
-         AVG(ph.expected_assists) AS avgXa,
-         AVG(ph.minutes) AS avgMinutes,
-         AVG(ph.bonus) AS avgBonus,
-         AVG(ph.expected_goals_conceded) AS avgXgc,
-         AVG(ph.saves) AS avgSaves,
-         COUNT(*) AS gwCount
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.expected_goals * 90.0 / ph.minutes END) AS recentXg90,
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.expected_assists * 90.0 / ph.minutes END) AS recentXa90,
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.expected_goals_conceded * 90.0 / ph.minutes END) AS recentXgc90,
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.bonus * 90.0 / ph.minutes END) AS recentBonus90,
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.saves * 90.0 / ph.minutes END) AS recentSaves90,
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.yellow_cards * 90.0 / ph.minutes END) AS recentYellow90,
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.red_cards * 90.0 / ph.minutes END) AS recentRed90,
+         AVG(CASE WHEN recent.round IS NOT NULL AND ph.minutes > 0 THEN ph.goals_conceded * 90.0 / ph.minutes END) AS recentGoalsConceded90,
+         AVG(CASE WHEN recent.round IS NOT NULL THEN ph.minutes END) AS recentAvgMinutes,
+         AVG(CASE WHEN recent.round IS NOT NULL THEN CASE WHEN ph.starts > 0 THEN 1.0 ELSE 0 END END) AS recentStartProbability,
+         SUM(CASE WHEN recent.round IS NOT NULL THEN 1 ELSE 0 END) AS recentGwCount,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.expected_goals * 90.0 / ph.minutes END) AS seasonXg90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.expected_assists * 90.0 / ph.minutes END) AS seasonXa90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.expected_goals_conceded * 90.0 / ph.minutes END) AS seasonXgc90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.bonus * 90.0 / ph.minutes END) AS seasonBonus90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.saves * 90.0 / ph.minutes END) AS seasonSaves90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.yellow_cards * 90.0 / ph.minutes END) AS seasonYellow90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.red_cards * 90.0 / ph.minutes END) AS seasonRed90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.goals_conceded * 90.0 / ph.minutes END) AS seasonGoalsConceded90,
+         AVG(ph.minutes) AS seasonAvgMinutes,
+         AVG(CASE WHEN ph.starts > 0 THEN 1.0 ELSE 0 END) AS seasonStartProbability,
+         COUNT(*) AS seasonGwCount
        FROM player_history ph
-       WHERE ph.round IN (
+       LEFT JOIN (
          SELECT DISTINCT round
          FROM player_history
+         ${recentRoundFilter}
          ORDER BY round DESC
          LIMIT 5
-       )
+       ) recent ON recent.round = ph.round
+       ${mainRoundFilter}
        GROUP BY ph.player_id`,
-    ).all() as RecentPlayerStats[];
+    ).all(...(cutoffRoundExclusive ? [cutoffRoundExclusive, cutoffRoundExclusive] : [])) as RecentPlayerStats[];
 
     return new Map(rows.map((row) => [row.playerId, row]));
   }
 
-  private getUpcomingTeamFixtures(startingGameweek: number, endingGameweek: number) {
+  private getPositionPriors(cutoffRoundExclusive?: number) {
+    const roundFilter = cutoffRoundExclusive ? "WHERE ph.round < ?" : "";
+    const rows = this.db.prepare(
+      `SELECT
+         p.position_id AS positionId,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.expected_goals * 90.0 / ph.minutes END) AS xg90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.expected_assists * 90.0 / ph.minutes END) AS xa90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.expected_goals_conceded * 90.0 / ph.minutes END) AS xgc90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.bonus * 90.0 / ph.minutes END) AS bonus90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.saves * 90.0 / ph.minutes END) AS saves90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.yellow_cards * 90.0 / ph.minutes END) AS yellow90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.red_cards * 90.0 / ph.minutes END) AS red90,
+         AVG(CASE WHEN ph.minutes > 0 THEN ph.goals_conceded * 90.0 / ph.minutes END) AS goalsConceded90,
+         AVG(ph.minutes) AS avgMinutes,
+         AVG(CASE WHEN ph.starts > 0 THEN 1.0 ELSE 0 END) AS startProbability
+       FROM player_history ph
+       JOIN players p ON p.id = ph.player_id
+       ${roundFilter}
+       GROUP BY p.position_id`,
+    ).all(...(cutoffRoundExclusive ? [cutoffRoundExclusive] : [])) as PositionPrior[];
+
+    return new Map(rows.map((row) => [row.positionId, row]));
+  }
+
+  private getUpcomingTeamFixtures(
+    startingGameweek: number,
+    endingGameweek: number,
+    includeFinished = false,
+  ) {
     const fdrMap = new Map(
       this.getFdrData().map((row) => [
         row.teamId,
@@ -1432,8 +1952,8 @@ export class QueryService {
        FROM teams t
        JOIN fixtures f ON (f.team_h = t.id OR f.team_a = t.id)
        JOIN teams opp ON opp.id = CASE WHEN f.team_h = t.id THEN f.team_a ELSE f.team_h END
-       WHERE f.finished = 0
-         AND f.event_id IS NOT NULL
+       WHERE f.event_id IS NOT NULL
+         AND (${includeFinished ? "1 = 1" : "f.finished = 0"})
          AND f.event_id >= ?
          AND f.event_id <= ?
        ORDER BY t.id, f.event_id, f.kickoff_time`,
@@ -1468,46 +1988,195 @@ export class QueryService {
     return fixturesByTeam;
   }
 
-  private projectFixturePoints(
-    positionId: number,
-    status: string,
-    stats: RecentPlayerStats | undefined,
-    isHome: boolean,
-    difficulty: number,
-  ) {
-    if (!stats || stats.gwCount < 2) {
-      return 0;
+  private getTeamStrengths(cutoffRoundExclusive?: number) {
+    const cutoffClause = cutoffRoundExclusive ? "AND event_id < ?" : "";
+    const teamRows = this.db.prepare(
+      `SELECT id, strength FROM teams ORDER BY id`,
+    ).all() as Array<{ id: number; strength: number }>;
+    const finishedFixtures = this.db.prepare(
+      `SELECT team_h AS homeTeamId, team_a AS awayTeamId, team_h_score AS homeGoals, team_a_score AS awayGoals
+       FROM fixtures
+       WHERE finished = 1
+         AND team_h_score IS NOT NULL
+         AND team_a_score IS NOT NULL
+         ${cutoffClause}
+       ORDER BY COALESCE(event_id, 0) DESC, id DESC`,
+    ).all(...(cutoffRoundExclusive ? [cutoffRoundExclusive] : [])) as Array<{
+      homeTeamId: number;
+      awayTeamId: number;
+      homeGoals: number;
+      awayGoals: number;
+    }>;
+
+    const teamStats = new Map<number, { goalsFor: number; goalsAgainst: number; matches: number }>();
+    for (const team of teamRows) {
+      teamStats.set(team.id, { goalsFor: 0, goalsAgainst: 0, matches: 0 });
     }
 
+    for (const fixture of finishedFixtures) {
+      const home = teamStats.get(fixture.homeTeamId);
+      if (home && home.matches < 8) {
+        home.goalsFor += fixture.homeGoals;
+        home.goalsAgainst += fixture.awayGoals;
+        home.matches += 1;
+      }
+
+      const away = teamStats.get(fixture.awayTeamId);
+      if (away && away.matches < 8) {
+        away.goalsFor += fixture.awayGoals;
+        away.goalsAgainst += fixture.homeGoals;
+        away.matches += 1;
+      }
+    }
+
+    const populated = [...teamStats.values()].filter((row) => row.matches > 0);
+    const leagueAvgGoals = populated.length > 0
+      ? populated.reduce((sum, row) => sum + (row.goalsFor / row.matches), 0) / populated.length
+      : 1.4;
+    const strengthByTeam = new Map(teamRows.map((row) => [row.id, row.strength]));
+
+    return new Map(teamRows.map((team) => {
+      const stats = teamStats.get(team.id) ?? { goalsFor: 0, goalsAgainst: 0, matches: 0 };
+      const strength = strengthByTeam.get(team.id) ?? 3;
+      const fallbackFor = leagueAvgGoals * (0.8 + (strength * 0.08));
+      const fallbackAgainst = leagueAvgGoals * Math.max(0.75, 1.2 - (strength * 0.08));
+      const weight = Math.min(stats.matches / 5, 1);
+      const avgGoalsFor = stats.matches > 0 ? stats.goalsFor / stats.matches : fallbackFor;
+      const avgGoalsAgainst = stats.matches > 0 ? stats.goalsAgainst / stats.matches : fallbackAgainst;
+      const blendedGoalsFor = (avgGoalsFor * weight) + (fallbackFor * (1 - weight));
+      const blendedGoalsAgainst = (avgGoalsAgainst * weight) + (fallbackAgainst * (1 - weight));
+
+      return [team.id, {
+        teamId: team.id,
+        attackStrength: blendedGoalsFor / Math.max(leagueAvgGoals, 0.6),
+        defenseWeakness: blendedGoalsAgainst / Math.max(leagueAvgGoals, 0.6),
+      }];
+    }));
+  }
+
+  private projectFixturePoints(
+    player: TransferProjectionPlayerRow,
+    stats: RecentPlayerStats | undefined,
+    prior: PositionPrior | undefined,
+    fixture: TeamUpcomingFixture,
+    teamStrengths: Map<number, TeamStrengthSnapshot>,
+  ): ProjectedFixtureScore {
     const goalPoints: Record<number, number> = { 1: 6, 2: 6, 3: 5, 4: 4 };
     const cleanSheetPoints: Record<number, number> = { 1: 6, 2: 6, 3: 1, 4: 0 };
-    const difficultyMultipliers: Record<number, number> = {
-      1: 1.2,
-      2: 1.1,
-      3: 1,
-      4: 0.85,
-      5: 0.75,
-    };
-    const availabilityPenalty = status === "a" ? 1 : 0.7;
-    const homeBoost = isHome ? 1.05 : 1;
-    const minutesProbability = Math.min(1, (stats.avgMinutes ?? 0) / 90);
-    const attackingContribution =
-      (stats.avgXg ?? 0) * (goalPoints[positionId] ?? 4) +
-      (stats.avgXa ?? 0) * 3 +
-      (positionId === 1 ? (stats.avgSaves ?? 0) / 3 : 0);
-    const cleanSheetProbability =
-      cleanSheetPoints[positionId] > 0
-        ? Math.max(0, 1 - (stats.avgXgc ?? 0))
-        : 0;
-    const appearance = minutesProbability * 2;
-    const bonus = stats.avgBonus ?? 0;
+    const concedePenalty: Record<number, number> = { 1: 1, 2: 1, 3: 0.5, 4: 0 };
 
-    return (
-      (((attackingContribution * minutesProbability) + (cleanSheetProbability * (cleanSheetPoints[positionId] ?? 0)) + appearance + bonus)
-        * (difficultyMultipliers[difficulty] ?? 1)
-        * homeBoost
-        * availabilityPenalty)
+    const teamStrength = teamStrengths.get(player.teamId);
+    const opponentStrength = teamStrengths.get(fixture.opponentId);
+    const attackMultiplier = (teamStrength?.attackStrength ?? 1) * (opponentStrength?.defenseWeakness ?? 1);
+    const opponentAttackMultiplier = (opponentStrength?.attackStrength ?? 1) * (teamStrength?.defenseWeakness ?? 1);
+    const homeAttackBoost = fixture.isHome ? 1.08 : 0.94;
+    const opponentAttackBoost = fixture.isHome ? 0.92 : 1.08;
+    const teamExpectedGoals = Math.max(0.35, 1.35 * attackMultiplier * homeAttackBoost);
+    const opponentExpectedGoals = Math.max(0.2, 1.15 * opponentAttackMultiplier * opponentAttackBoost);
+    const availabilityPenalty = player.status === "a" ? 1 : 0.72;
+    const rates = this.getPlayerEventRates(player, stats, prior);
+    const minutesProbability = Math.min(1, rates.minutesProbability * availabilityPenalty);
+    const startProbability = Math.min(1, rates.startProbability * availabilityPenalty);
+    const sixtyProbability = Math.min(startProbability, minutesProbability * 1.08);
+    const expectedMinutesShare = minutesProbability;
+
+    const expectedGoals = rates.xg90 * expectedMinutesShare * (teamExpectedGoals / 1.35);
+    const expectedAssists = rates.xa90 * expectedMinutesShare * (teamExpectedGoals / 1.35);
+    const cleanSheetProbability = cleanSheetPoints[player.positionId] > 0
+      ? Math.exp(-opponentExpectedGoals)
+      : 0;
+    const expectedSaves = player.positionId === 1
+      ? rates.saves90 * expectedMinutesShare * Math.max(0.85, opponentExpectedGoals / 1.15)
+      : 0;
+    const appearance = startProbability + sixtyProbability;
+    const bonus = Math.min(0.75, rates.bonus90 * expectedMinutesShare * Math.max(0.9, teamExpectedGoals / 1.35));
+    const disciplinePenalty = ((rates.yellow90 * 1) + (rates.red90 * 3)) * expectedMinutesShare;
+    const cleanSheetScore = cleanSheetProbability * (cleanSheetPoints[player.positionId] ?? 0) * sixtyProbability;
+    const concedeScore = (concedePenalty[player.positionId] ?? 0) * (opponentExpectedGoals / 2) * sixtyProbability;
+    const attacking =
+      (expectedGoals * (goalPoints[player.positionId] ?? 4)) +
+      (expectedAssists * 3) +
+      (expectedSaves / 3);
+    const total = this.roundToTenth(
+      appearance + attacking + cleanSheetScore + bonus - concedeScore - disciplinePenalty,
     );
+
+    return {
+      total,
+      attacking: this.roundToTenth(attacking + bonus),
+      cleanSheet: this.roundToTenth(cleanSheetScore),
+      appearance: this.roundToTenth(appearance),
+      minutesProbability: this.roundToTenth(minutesProbability),
+      startProbability: this.roundToTenth(startProbability),
+      expectedGoalsConceded: this.roundToTenth(opponentExpectedGoals),
+      cleanSheetProbability: this.roundToTenth(cleanSheetProbability),
+    };
+  }
+
+  private getPlayerEventRates(
+    player: TransferProjectionPlayerRow,
+    stats: RecentPlayerStats | undefined,
+    prior: PositionPrior | undefined,
+  ) {
+    const seasonMinutes = Math.max(player.totalMinutes ?? 0, 1);
+    const seasonStarts = Math.max(player.totalStarts ?? 0, 0);
+    const seasonXg90 = seasonMinutes > 0 ? ((player.totalExpectedGoals ?? 0) * 90) / seasonMinutes : 0;
+    const seasonXa90 = seasonMinutes > 0 ? ((player.totalExpectedAssists ?? 0) * 90) / seasonMinutes : 0;
+    const seasonXgc90 = seasonMinutes > 0 ? ((player.totalExpectedGoalsConceded ?? 0) * 90) / seasonMinutes : 0;
+    const seasonBonus90 = seasonMinutes > 0 ? ((player.totalBonus ?? 0) * 90) / seasonMinutes : 0;
+    const recentWeight = Math.min((stats?.recentGwCount ?? 0) / 5, 1) * 0.6;
+    const seasonWeight = Math.min(seasonMinutes / 900, 1) * (1 - recentWeight) * 0.8;
+    const priorWeight = Math.max(0, 1 - recentWeight - seasonWeight);
+    const sparseHistoryFallback = (stats?.recentGwCount ?? 0) < 2 && seasonMinutes < 360;
+
+    const blend = (recent: number | undefined, season: number, priorValue: number) => {
+      if (sparseHistoryFallback) {
+        return (season * 0.3) + (priorValue * 0.7);
+      }
+
+      return (
+        ((recent ?? 0) * recentWeight) +
+        (season * seasonWeight) +
+        (priorValue * priorWeight)
+      );
+    };
+
+    const priorXg90 = prior?.xg90 ?? 0.12;
+    const priorXa90 = prior?.xa90 ?? 0.09;
+    const priorXgc90 = prior?.xgc90 ?? 1.2;
+    const priorBonus90 = prior?.bonus90 ?? 0.18;
+    const priorSaves90 = prior?.saves90 ?? (player.positionId === 1 ? 3 : 0);
+    const priorYellow90 = prior?.yellow90 ?? 0.12;
+    const priorRed90 = prior?.red90 ?? 0.01;
+    const priorMinutes = prior?.avgMinutes ?? 62;
+    const priorStarts = prior?.startProbability ?? 0.6;
+
+    return {
+      xg90: blend(stats?.recentXg90, stats?.seasonXg90 ?? seasonXg90, priorXg90),
+      xa90: blend(stats?.recentXa90, stats?.seasonXa90 ?? seasonXa90, priorXa90),
+      xgc90: blend(stats?.recentXgc90, stats?.seasonXgc90 ?? seasonXgc90, priorXgc90),
+      bonus90: blend(stats?.recentBonus90, stats?.seasonBonus90 ?? seasonBonus90, priorBonus90),
+      saves90: blend(stats?.recentSaves90, stats?.seasonSaves90 ?? 0, priorSaves90),
+      yellow90: blend(stats?.recentYellow90, stats?.seasonYellow90 ?? 0.1, priorYellow90),
+      red90: blend(stats?.recentRed90, stats?.seasonRed90 ?? 0.01, priorRed90),
+      goalsConceded90: blend(stats?.recentGoalsConceded90, stats?.seasonGoalsConceded90 ?? 1.2, priorXgc90),
+      minutesProbability: Math.min(
+        1,
+        blend(
+          (stats?.recentAvgMinutes ?? 0) / 90,
+          seasonMinutes > 0 ? Math.min(1, seasonMinutes / Math.max(90 * Math.max(seasonStarts, 1), 90)) : 0,
+          Math.min(1, priorMinutes / 90),
+        ),
+      ),
+      startProbability: Math.min(
+        1,
+        blend(
+          stats?.recentStartProbability,
+          seasonStarts > 0 ? Math.min(1, seasonStarts / Math.max((seasonMinutes / 75), 1)) : 0,
+          priorStarts,
+        ),
+      ),
+    };
   }
 
   private roundToTenth(value: number) {
