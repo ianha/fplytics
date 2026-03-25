@@ -83,7 +83,7 @@ const COLUMN_ANNOTATIONS: Readonly<Record<string, Record<string, string>>> = {
   },
   my_team_accounts: {
     entry_id:               "FPL entry/team ID used in API calls",
-    auth_status:            "linked=active | error=needs relink",
+    auth_status:            "linked=credentials stored but not yet fully authenticated | authenticated=active | relogin_required=needs relink",
     encrypted_credentials:  "AES-encrypted login credentials — never expose",
   },
   my_team_gameweeks: {
@@ -229,7 +229,7 @@ player_future_fixtures(player_id→players, fixture_id→fixtures, event_id→ga
 my_team_accounts(id INTEGER PK AUTOINCREMENT, email TEXT UNIQUE, team_name TEXT,
   player_first_name TEXT, player_last_name TEXT, entry_id INTEGER,
   auth_status TEXT, updated_at TEXT)
-  — auth_status: 'linked'=active | 'error'=needs relink
+  — auth_status: 'linked'=credentials stored but not yet fully authenticated | 'authenticated'=active | 'relogin_required'=needs relink
   — one row per linked FPL account
 
 my_team_gameweeks(account_id→my_team_accounts, gameweek_id→gameweeks,

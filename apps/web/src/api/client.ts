@@ -12,6 +12,8 @@ import type {
   GameweekSummary,
   MyTeamPageResponse,
   MyTeamGameweekPicksResponse,
+  TransferDecisionHorizon,
+  TransferDecisionResponse,
 } from "@fpl/contracts";
 import type { ChatMessage, ProviderInfo } from "@/pages/chatPageUtils";
 
@@ -144,6 +146,27 @@ export function getPlayerXpts(gw?: number) {
 
 export function getCaptainRecommendation(accountId: number, gw: number) {
   return request<CaptainRecommendation[]>(`/my-team/captain-pick?accountId=${accountId}&gw=${gw}`);
+}
+
+export function getTransferDecision(
+  accountId: number,
+  params?: {
+    gw?: number;
+    horizon?: TransferDecisionHorizon;
+    includeHits?: boolean;
+    maxHit?: 0 | 4 | 8;
+  },
+) {
+  const search = new URLSearchParams();
+  if (params?.gw !== undefined) search.set("gw", String(params.gw));
+  if (params?.horizon !== undefined) search.set("horizon", String(params.horizon));
+  if (params?.includeHits !== undefined) search.set("includeHits", String(params.includeHits));
+  if (params?.maxHit !== undefined) search.set("maxHit", String(params.maxHit));
+  const query = search.toString();
+
+  return request<TransferDecisionResponse>(
+    `/my-team/${accountId}/transfer-decision${query ? `?${query}` : ""}`,
+  );
 }
 
 export function getLiveGwSnapshot(gw: number) {

@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS my_team_picks (
   is_vice_captain INTEGER NOT NULL DEFAULT 0,
   selling_price INTEGER,
   purchase_price INTEGER,
+  gw_points INTEGER,
   PRIMARY KEY(account_id, gameweek_id, position),
   FOREIGN KEY(account_id) REFERENCES my_team_accounts(id),
   FOREIGN KEY(player_id) REFERENCES players(id)

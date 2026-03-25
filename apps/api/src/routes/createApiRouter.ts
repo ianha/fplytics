@@ -6,6 +6,7 @@ import { liveGwService } from "../services/liveGwService.js";
 import type { LiveGwUpdate } from "@fpl/contracts";
 import { RecapCardService } from "../services/recapCardService.js";
 import { env } from "../config/env.js";
+import type { TransferDecisionHorizon } from "@fpl/contracts";
 
 function escapeHtml(value: string): string {
   return value
@@ -149,6 +150,38 @@ export function createApiRouter(db: AppDatabase) {
   router.get("/my-team", (req, res) => {
     const accountId = req.query.accountId ? Number(req.query.accountId) : undefined;
     res.json(queryService.getMyTeam(accountId));
+  });
+
+  router.get("/my-team/:accountId/transfer-decision", (req, res) => {
+    const accountId = Number(req.params.accountId);
+    const gw = req.query.gw ? Number(req.query.gw) : undefined;
+    const rawHorizon = req.query.horizon ? Number(req.query.horizon) : 3;
+    const horizon = ([1, 3, 5].includes(rawHorizon)
+      ? rawHorizon
+      : null) as TransferDecisionHorizon | null;
+
+    if (!accountId) {
+      res.status(400).json({ message: "accountId must be a positive integer" });
+      return;
+    }
+
+    if (gw !== undefined && (!Number.isInteger(gw) || gw <= 0)) {
+      res.status(400).json({ message: "gw must be a positive integer when provided" });
+      return;
+    }
+
+    if (!horizon) {
+      res.status(400).json({ message: "horizon must be one of 1, 3, or 5" });
+      return;
+    }
+
+    const response = queryService.getTransferDecision(accountId, { gw, horizon });
+    if (!response) {
+      res.status(404).json({ message: "Transfer decision data not available for that account/gameweek" });
+      return;
+    }
+
+    res.json(response);
   });
 
   router.post("/my-team/auth", async (req, res) => {

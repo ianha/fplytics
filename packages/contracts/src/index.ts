@@ -209,6 +209,47 @@ export type MyTeamPageResponse = {
   history: MyTeamHistoryRow[];
 };
 
+export type TransferDecisionHorizon = 1 | 3 | 5;
+
+export type TransferDecisionRequest = {
+  gw?: number;
+  horizon: TransferDecisionHorizon;
+  includeHits?: boolean;
+  maxHit?: 0 | 4 | 8;
+};
+
+export type TransferDecisionOptionLabel = "roll" | "best_1ft" | "best_2ft" | "best_hit";
+
+export type TransferDecisionOption = {
+  id: string;
+  label: TransferDecisionOptionLabel;
+  transfers: Array<{
+    outPlayerId: number;
+    outPlayerName: string;
+    inPlayerId: number;
+    inPlayerName: string;
+    position: string;
+    priceDelta: number;
+  }>;
+  horizon: TransferDecisionHorizon;
+  projectedGain: number;
+  nextGwGain: number;
+  hitCost: number;
+  remainingBank: number;
+  confidence: "strong" | "medium" | "close_call" | "aggressive";
+  reasons: string[];
+  warnings: string[];
+};
+
+export type TransferDecisionResponse = {
+  gameweek: number;
+  freeTransfers: number;
+  bank: number;
+  horizon: TransferDecisionHorizon;
+  recommendedOptionId: string;
+  options: TransferDecisionOption[];
+};
+
 export type FdrFixture = {
   gameweek: number;
   opponentId: number;

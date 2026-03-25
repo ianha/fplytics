@@ -109,16 +109,65 @@ function buildPayload() {
   };
 }
 
+function buildTransferDecisionPayload() {
+  return {
+    gameweek: 7,
+    freeTransfers: 2,
+    bank: 14,
+    horizon: 3 as const,
+    recommendedOptionId: "best-1ft",
+    options: [
+      {
+        id: "roll",
+        label: "roll" as const,
+        transfers: [],
+        horizon: 3 as const,
+        projectedGain: 0,
+        nextGwGain: 0,
+        hitCost: 0,
+        remainingBank: 14,
+        confidence: "medium" as const,
+        reasons: ["Sets the baseline for this week's decision."],
+        warnings: [],
+      },
+      {
+        id: "best-1ft",
+        label: "best_1ft" as const,
+        transfers: [
+          {
+            outPlayerId: mockPlayers[0].id,
+            outPlayerName: mockPlayers[0].webName,
+            inPlayerId: mockPlayers[20].id,
+            inPlayerName: mockPlayers[20].webName,
+            position: mockPlayers[20].positionName,
+            priceDelta: 2,
+          },
+        ],
+        horizon: 3 as const,
+        projectedGain: 2.4,
+        nextGwGain: 1.1,
+        hitCost: 0,
+        remainingBank: 12,
+        confidence: "strong" as const,
+        reasons: ["+2.4 xPts over 3 GWs."],
+        warnings: [],
+      },
+    ],
+  };
+}
+
 const {
   getMyTeamMock,
   getMyTeamGameweekPicksMock,
   getPlayerXptsMock,
+  getTransferDecisionMock,
   linkMyTeamAccountMock,
   syncMyTeamMock,
 } = vi.hoisted(() => ({
   getMyTeamMock: vi.fn(),
   getMyTeamGameweekPicksMock: vi.fn(),
   getPlayerXptsMock: vi.fn(),
+  getTransferDecisionMock: vi.fn(),
   linkMyTeamAccountMock: vi.fn(),
   syncMyTeamMock: vi.fn(),
 }));
@@ -127,6 +176,7 @@ vi.mock("@/api/client", () => ({
   getMyTeam: getMyTeamMock,
   getMyTeamGameweekPicks: getMyTeamGameweekPicksMock,
   getPlayerXpts: getPlayerXptsMock,
+  getTransferDecision: getTransferDecisionMock,
   linkMyTeamAccount: linkMyTeamAccountMock,
   syncMyTeam: syncMyTeamMock,
   getCaptainRecommendation: vi.fn(() => Promise.resolve([])),
@@ -159,6 +209,7 @@ describe("MyTeamPage", () => {
         minutesProbability: 0.92,
       },
     ]);
+    getTransferDecisionMock.mockResolvedValue(buildTransferDecisionPayload());
     linkMyTeamAccountMock.mockResolvedValue(buildPayload());
     syncMyTeamMock.mockResolvedValue(buildPayload());
   });
@@ -310,5 +361,49 @@ describe("MyTeamPage", () => {
     expect(screen.getByRole("button", { name: /Relink required/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Relink and sync/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/Password/i)).toBeInTheDocument();
+  });
+
+  it("renders the transfer decision workspace and switches horizons", async () => {
+    getTransferDecisionMock
+      .mockResolvedValueOnce(buildTransferDecisionPayload())
+      .mockResolvedValueOnce({
+        ...buildTransferDecisionPayload(),
+        horizon: 1,
+        recommendedOptionId: "roll",
+        options: [
+          {
+            ...buildTransferDecisionPayload().options[0],
+            horizon: 1,
+          },
+          {
+            ...buildTransferDecisionPayload().options[1],
+            horizon: 1,
+            projectedGain: 0.2,
+            nextGwGain: 0.2,
+            confidence: "close_call",
+            reasons: ["+0.2 xPts over 1 GW."],
+            warnings: ["Close to rolling this week."],
+          },
+        ],
+      });
+
+    render(
+      <MemoryRouter>
+        <MyTeamPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Top Recommendation/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Best 1FT/i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(new RegExp(`${mockPlayers[0].webName} -> ${mockPlayers[20].webName}`, "i")).length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /^1 GW$/i }));
+
+    await waitFor(() => {
+      expect(getTransferDecisionMock).toHaveBeenLastCalledWith(1, { gw: 7, horizon: 1 });
+    });
+    expect(await screen.findByText(/No single move clearly beats waiting one more week/i)).toBeInTheDocument();
   });
 });

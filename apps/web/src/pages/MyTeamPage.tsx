@@ -2,8 +2,30 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { motion, MotionConfig, useMotionValue, useMotionTemplate, animate } from "framer-motion";
 import { ArrowRightLeft, ChevronLeft, ChevronRight, Coins, Crown, ExternalLink, Share2, ShieldAlert, Sparkles, Trophy, Zap } from "lucide-react";
-import type { CaptainRecommendation, LiveGwUpdate, MyTeamGameweekPicksResponse, MyTeamPageResponse, MyTeamPick, PlayerDetail, PlayerXpts } from "@fpl/contracts";
-import { getCaptainRecommendation, getMyTeam, getMyTeamGameweekPicks, getPlayer, getPlayerXpts, linkMyTeamAccount, resolveAssetUrl, subscribeLiveGw, syncMyTeam } from "@/api/client";
+import type {
+  CaptainRecommendation,
+  LiveGwUpdate,
+  MyTeamGameweekPicksResponse,
+  MyTeamPageResponse,
+  MyTeamPick,
+  PlayerDetail,
+  PlayerXpts,
+  TransferDecisionHorizon,
+  TransferDecisionOption,
+  TransferDecisionResponse,
+} from "@fpl/contracts";
+import {
+  getCaptainRecommendation,
+  getMyTeam,
+  getMyTeamGameweekPicks,
+  getPlayer,
+  getPlayerXpts,
+  getTransferDecision,
+  linkMyTeamAccount,
+  resolveAssetUrl,
+  subscribeLiveGw,
+  syncMyTeam,
+} from "@/api/client";
 import { BGPattern, GlowCard } from "@/components/ui/glow-card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -118,6 +140,36 @@ function getHistoricalCacheKey(accountId: number, gameweek: number): string {
 }
 
 type PitchOverlayMode = "normal" | "xpts";
+type TransferDecisionState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; payload: TransferDecisionResponse };
+
+function formatTransferDecisionLabel(label: TransferDecisionOption["label"]) {
+  switch (label) {
+    case "roll":
+      return "Roll";
+    case "best_1ft":
+      return "Best 1FT";
+    case "best_2ft":
+      return "Best 2FT";
+    case "best_hit":
+      return "Best Hit";
+    default:
+      return label;
+  }
+}
+
+function formatTransferSummary(option: TransferDecisionOption) {
+  if (option.transfers.length === 0) {
+    return "Keep your squad as-is";
+  }
+
+  return option.transfers
+    .map((transfer) => `${transfer.outPlayerName} -> ${transfer.inPlayerName}`)
+    .join(", ");
+}
 
 function PitchPlayerCard({
   entry,
@@ -311,6 +363,8 @@ export function MyTeamPage() {
   const [playerDetail, setPlayerDetail] = useState<PlayerDetail | null>(null);
   const [playerDetailLoading, setPlayerDetailLoading] = useState(false);
   const [shareGw, setShareGw] = useState<number | null>(null);
+  const [transferHorizon, setTransferHorizon] = useState<TransferDecisionHorizon>(3);
+  const [transferDecision, setTransferDecision] = useState<TransferDecisionState>({ status: "idle" });
 
   useEffect(() => {
     if (!selectedPick) {
@@ -558,6 +612,35 @@ export function MyTeamPage() {
       .then(setCaptainRecs)
       .catch(() => {});
   }, [selectedAccount?.id, payload?.currentGameweek]);
+
+  useEffect(() => {
+    const accountId = selectedAccount?.id;
+    const gw = payload?.currentGameweek;
+    if (!accountId || !gw) {
+      setTransferDecision({ status: "idle" });
+      return;
+    }
+
+    let cancelled = false;
+    setTransferDecision({ status: "loading" });
+
+    getTransferDecision(accountId, { gw, horizon: transferHorizon })
+      .then((response) => {
+        if (cancelled) return;
+        setTransferDecision({ status: "ready", payload: response });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setTransferDecision({
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAccount?.id, payload?.currentGameweek, transferHorizon]);
   const relinkMessage = summarizeAuthError(selectedAccount?.authError ?? null);
 
   if (state.status === "loading") {
@@ -1038,11 +1121,12 @@ export function MyTeamPage() {
           {/* Transfer Planner */}
           <motion.div className="min-w-0" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14, duration: 0.45 }}>
             <GlowCard className="p-5 sm:p-6">
-              {/* Header */}
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="font-display text-xl font-bold">Transfer Planner</h2>
-                  <p className="mt-0.5 text-sm text-white/50">Sync controls stay here while the local planner workspace is being rebuilt.</p>
+                  <h2 className="font-display text-xl font-bold">Transfer Decision</h2>
+                  <p className="mt-0.5 text-sm text-white/50">
+                    Roll versus the best single move before the deadline.
+                  </p>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <Button
@@ -1065,9 +1149,126 @@ export function MyTeamPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-dashed border-white/10 bg-white/4 p-4 text-sm leading-6 text-white/55">
-                Planner actions are temporarily unavailable in the UI while the shared My Team shell is being simplified. Use the synced pitch, gameweek history, and transfer log here, then make final moves on the official FPL site.
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                {([1, 3] as const).map((horizon) => (
+                  <button
+                    key={horizon}
+                    type="button"
+                    onClick={() => setTransferHorizon(horizon)}
+                    aria-pressed={transferHorizon === horizon}
+                    className={cn(
+                      "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors",
+                      transferHorizon === horizon
+                        ? "border-accent/60 bg-accent/15 text-accent"
+                        : "border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-white",
+                    )}
+                  >
+                    {horizon} GW
+                  </button>
+                ))}
               </div>
+
+              {transferDecision.status === "loading" || transferDecision.status === "idle" ? (
+                <div className="flex items-center justify-center rounded-2xl border border-white/8 bg-white/4 px-4 py-10 text-sm text-white/55">
+                  <div className="flex items-center gap-3">
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                    <span>Building the best deadline call…</span>
+                  </div>
+                </div>
+              ) : transferDecision.status === "error" ? (
+                <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
+                  {transferDecision.message}
+                </div>
+              ) : (
+                <>
+                  {(() => {
+                    const recommended = transferDecision.payload.options.find(
+                      (option) => option.id === transferDecision.payload.recommendedOptionId,
+                    ) ?? transferDecision.payload.options[0];
+
+                    return (
+                      <div className="mb-4 rounded-2xl border border-accent/20 bg-accent/10 p-4">
+                        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Top Recommendation
+                        </div>
+                        <p className="mt-2 text-base font-semibold text-white">
+                          {formatTransferDecisionLabel(recommended.label)}
+                        </p>
+                        <p className="mt-1 text-sm text-white/65">
+                          {recommended.label === "roll"
+                            ? "No single move clearly beats waiting one more week."
+                            : formatTransferSummary(recommended)}
+                        </p>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="grid gap-3">
+                    {transferDecision.payload.options.map((option) => {
+                      const isRecommended =
+                        option.id === transferDecision.payload.recommendedOptionId;
+
+                      return (
+                        <div
+                          key={option.id}
+                          className={cn(
+                            "rounded-2xl border p-4 transition-colors",
+                            isRecommended
+                              ? "border-accent/35 bg-accent/10"
+                              : "border-white/8 bg-white/4",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-white">
+                                {formatTransferDecisionLabel(option.label)}
+                              </p>
+                              <p className="mt-1 text-sm text-white/60">
+                                {formatTransferSummary(option)}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className={cn(
+                                "font-display text-lg font-bold",
+                                option.projectedGain > 0 ? "text-accent" : "text-white",
+                              )}>
+                                {option.projectedGain > 0 ? "+" : ""}
+                                {option.projectedGain.toFixed(1)}
+                              </p>
+                              <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">xPts</p>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/50">
+                            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+                              Bank: {formatCost(option.remainingBank)}
+                            </span>
+                            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+                              Next GW: {option.nextGwGain > 0 ? "+" : ""}{option.nextGwGain.toFixed(1)}
+                            </span>
+                            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+                              {option.confidence.replace("_", " ")}
+                            </span>
+                          </div>
+
+                          {option.reasons.length > 0 && (
+                            <p className="mt-3 text-sm leading-6 text-white/70">
+                              {option.reasons[0]}
+                            </p>
+                          )}
+
+                          {option.warnings.length > 0 && (
+                            <p className="mt-2 text-xs leading-5 text-amber-200/85">
+                              {option.warnings[0]}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </GlowCard>
           </motion.div>
         </div>
