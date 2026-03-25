@@ -166,7 +166,16 @@ export function getTransferDecision(
 
   return request<TransferDecisionResponse>(
     `/my-team/${accountId}/transfer-decision${query ? `?${query}` : ""}`,
-  );
+  ).then((response) => ({
+    ...response,
+    replayState: response.replayState ?? "full",
+    replayNotes: response.replayNotes ?? [],
+    recommendedOptionId:
+      response.recommendedOptionId ??
+      response.options?.[0]?.id ??
+      null,
+    options: response.options ?? [],
+  }));
 }
 
 export function getLiveGwSnapshot(gw: number) {

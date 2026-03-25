@@ -219,6 +219,7 @@ export type TransferDecisionRequest = {
 };
 
 export type TransferDecisionOptionLabel = "roll" | "best_1ft" | "best_2ft" | "best_hit";
+export type TransferDecisionReplayState = "full" | "degraded" | "unavailable";
 
 export type TransferDecisionOption = {
   id: string;
@@ -246,7 +247,9 @@ export type TransferDecisionResponse = {
   freeTransfers: number;
   bank: number;
   horizon: TransferDecisionHorizon;
-  recommendedOptionId: string;
+  replayState: TransferDecisionReplayState;
+  replayNotes: string[];
+  recommendedOptionId: string | null;
   options: TransferDecisionOption[];
 };
 

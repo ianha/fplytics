@@ -233,6 +233,8 @@ describe("App", () => {
     freeTransfers: 2,
     bank: 14,
     horizon: 3,
+    replayState: "full",
+    replayNotes: [],
     recommendedOptionId: "roll",
     options: [
       {

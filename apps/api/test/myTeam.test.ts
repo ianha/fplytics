@@ -366,6 +366,33 @@ describe("My Team sync", () => {
     });
   });
 
+  it("serves historical transfer decisions as explicit replay states instead of 404s", async () => {
+    const db = createDatabase(path.join(tempDir, "historical-transfer-decision.sqlite"));
+    seedTransferDecisionData(db);
+
+    db.prepare(
+      `INSERT INTO my_team_gameweeks (
+        account_id, gameweek_id, points, total_points, overall_rank, rank, bank, value, event_transfers,
+        event_transfers_cost, points_on_bench, active_chip
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(1, 6, 58, 548, 154820, 154820, 12, 1007, 1, 0, 3, null);
+
+    db.prepare(
+      `INSERT INTO my_team_picks (
+        account_id, gameweek_id, player_id, position, multiplier, is_captain, is_vice_captain, selling_price, purchase_price
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(1, 6, 10, 1, 1, 0, 0, 105, 100);
+
+    const app = createApp(db);
+    const response = await request(app)
+      .get("/api/my-team/1/transfer-decision?gw=6&horizon=3")
+      .expect(200);
+
+    expect(response.body.gameweek).toBe(6);
+    expect(response.body.replayState).toBeDefined();
+    expect(Array.isArray(response.body.replayNotes)).toBe(true);
+  });
+
   it("normalizes null rank values from FPL history instead of failing the sync", async () => {
     const db = createDatabase(path.join(tempDir, "test.sqlite"));
     seedPublicData(db);

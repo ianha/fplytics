@@ -115,6 +115,8 @@ function buildTransferDecisionPayload() {
     freeTransfers: 2,
     bank: 14,
     horizon: 3 as const,
+    replayState: "full" as const,
+    replayNotes: [],
     recommendedOptionId: "best-1ft",
     options: [
       {
@@ -149,10 +151,35 @@ function buildTransferDecisionPayload() {
         hitCost: 0,
         remainingBank: 12,
         confidence: "strong" as const,
-        reasons: ["+2.4 xPts over 3 GWs."],
+        reasons: ["+2.4 xPts over 3 GWs.", "Adds more goal involvement upside across the horizon."],
         warnings: [],
       },
     ],
+  };
+}
+
+function buildHistoricalTransferDecisionPayload(gameweek: number) {
+  return {
+    ...buildTransferDecisionPayload(),
+    gameweek,
+    replayState: "degraded" as const,
+    replayNotes: [
+      "Historical replay uses stored pre-deadline squad and price context.",
+      "Historical free transfers are inferred conservatively as 1.",
+    ],
+  };
+}
+
+function buildUnavailableHistoricalTransferDecisionPayload(gameweek: number) {
+  return {
+    gameweek,
+    freeTransfers: 1,
+    bank: 12,
+    horizon: 3 as const,
+    replayState: "unavailable" as const,
+    replayNotes: ["Historical replay is unavailable for this gameweek because stored squad context is incomplete."],
+    recommendedOptionId: null,
+    options: [],
   };
 }
 
@@ -269,6 +296,9 @@ describe("MyTeamPage", () => {
     await waitFor(() => {
       expect(getMyTeamGameweekPicksMock).toHaveBeenCalledWith(1, 6);
     });
+    await waitFor(() => {
+      expect(getTransferDecisionMock).toHaveBeenLastCalledWith(1, { gw: 6, horizon: 3 });
+    });
     expect(await screen.findByText(/48 pts · 3 on bench/i, { selector: "p" })).toBeInTheDocument();
   });
 
@@ -369,6 +399,8 @@ describe("MyTeamPage", () => {
       .mockResolvedValueOnce({
         ...buildTransferDecisionPayload(),
         horizon: 1,
+        replayState: "full" as const,
+        replayNotes: [],
         recommendedOptionId: "roll",
         options: [
           {
@@ -398,6 +430,7 @@ describe("MyTeamPage", () => {
     expect(
       screen.getAllByText(new RegExp(`${mockPlayers[0].webName} -> ${mockPlayers[20].webName}`, "i")).length,
     ).toBeGreaterThan(0);
+    expect(screen.getAllByText(/\+2\.4 xPts over 3 GWs\./i).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /^1 GW$/i }));
 
@@ -405,5 +438,65 @@ describe("MyTeamPage", () => {
       expect(getTransferDecisionMock).toHaveBeenLastCalledWith(1, { gw: 7, horizon: 1 });
     });
     expect(await screen.findByText(/No single move clearly beats waiting one more week/i)).toBeInTheDocument();
+    expect(screen.getByText(/Close to rolling this week\./i)).toBeInTheDocument();
+  });
+
+  it("still loads when replay metadata is missing from the transfer decision response", async () => {
+    getTransferDecisionMock.mockResolvedValueOnce({
+      gameweek: 7,
+      freeTransfers: 2,
+      bank: 14,
+      horizon: 3,
+      recommendedOptionId: "roll",
+      options: [
+        {
+          id: "roll",
+          label: "roll",
+          transfers: [],
+          horizon: 3,
+          projectedGain: 0,
+          nextGwGain: 0,
+          hitCost: 0,
+          remainingBank: 14,
+          confidence: "medium",
+          reasons: ["Sets the baseline for this week's decision."],
+          warnings: [],
+        },
+      ],
+    } as any);
+
+    render(
+      <MemoryRouter>
+        <MyTeamPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Top Recommendation/i)).toBeInTheDocument();
+    expect(screen.getByText(/Live recommendation/i)).toBeInTheDocument();
+  });
+
+  it("shows historical replay notes for past gameweeks", async () => {
+    getTransferDecisionMock.mockResolvedValueOnce(buildHistoricalTransferDecisionPayload(6));
+
+    render(
+      <MemoryRouter initialEntries={["/my-team?accountId=1&viewGW=6"]}>
+        <MyTeamPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/^Historical replay$/i)).toBeInTheDocument();
+    expect(screen.getByText(/stored pre-deadline squad and price context/i)).toBeInTheDocument();
+  });
+
+  it("shows an unavailable historical replay state instead of stale recommendations", async () => {
+    getTransferDecisionMock.mockResolvedValueOnce(buildUnavailableHistoricalTransferDecisionPayload(6));
+
+    render(
+      <MemoryRouter initialEntries={["/my-team?accountId=1&viewGW=6"]}>
+        <MyTeamPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/^Historical replay is unavailable for this gameweek\.$/i)).toBeInTheDocument();
   });
 });
