@@ -8,6 +8,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "sync": "node --import tsx src/cli/sync.ts",
+    "ack:pending-ml-evaluation": "node --import tsx src/cli/ackPendingMlEvaluation.ts",
+    "seed:pending-ml-evaluation": "node --import tsx src/cli/seedPendingMlEvaluation.ts",
     "link:my-team": "node --import tsx src/cli/linkMyTeam.ts",
     "sync:my-team": "node --import tsx src/cli/syncMyTeam.ts",
     "test": "vitest run",

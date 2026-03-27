@@ -30,6 +30,14 @@ You can append flags directly behind the `--` separator to modify the behavior o
 - `--player <id>`: Target a single player, optionally within one gameweek.
 - `--force`: Bypass caching, downloading data and image assets even if hashes match.
 
+**`npm run seed:pending-ml-evaluation`** (One-off backfill for already-finished gameweeks)
+- No flags: Queue every currently finished gameweek that is not already pending.
+- `--gameweek <id>`: Queue one specific finished gameweek.
+
+**`npm run ack:pending-ml-evaluation`** (Clear processed queue items after successful training)
+- `--gameweek <id>`: Remove one successfully processed gameweek from the pending queue.
+- `--all`: Clear the full queue after a successful batch training/publish run.
+
 **`npm run sync:my-team`** (Refreshes linked manager account queries)
 - `--gameweek <id>`: Fetch picks/scores for a specific GW.
 - `--account <id>`: Target an account via local database ID.
@@ -53,7 +61,7 @@ Public-data sync now owns the durable handoff for retraining after finished game
 
 1. `npm run sync` (or `npm run sync -- --gameweek <id>`) updates `gameweeks`.
 2. When a gameweek transitions from `is_finished = 0` to `is_finished = 1`, the sync layer appends that gameweek id to the `sync_state` key `pending_ml_evaluation`.
-3. External training code can poll that state, fetch training data through MCP, publish a validated model version, and only then clear the completed gameweek from the queue.
+3. External training code can poll that state, fetch training data through MCP, publish a validated model version, and only then clear the completed gameweek from the queue with `npm run ack:pending-ml-evaluation -- --gameweek <id>` (or `--all` for a full successful batch).
 
 Operational guarantees:
 
@@ -63,6 +71,15 @@ Operational guarantees:
 - Learned model activation stays decoupled from sync, so upstream data refreshes are not blocked by trainer availability.
 
 The CLI prints queued gameweeks after a successful run whenever pending ML evaluation work exists, making stalled retraining windows visible during normal operations.
+
+If you need to backfill already-finished historical gameweeks after enabling this workflow, run `npm run seed:pending-ml-evaluation`. The command is idempotent and only appends gameweeks that are finished and not already present in the pending queue.
+
+Example manual loop:
+
+1. Run `npm run sync`
+2. Read `pending_ml_evaluation` from `sync_state` or via your trainer
+3. Train and publish through MCP
+4. Run `npm run ack:pending-ml-evaluation -- --gameweek <id>` for each successful publish
 
 ## API Endpoints (`PORT=4000`)
 
