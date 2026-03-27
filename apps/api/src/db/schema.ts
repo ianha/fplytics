@@ -180,6 +180,32 @@ CREATE TABLE IF NOT EXISTS sync_state (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ml_model_registry (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  model_name TEXT NOT NULL UNIQUE,
+  target_metric TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ml_model_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  registry_id INTEGER NOT NULL,
+  version_tag TEXT,
+  coefficients_json TEXT NOT NULL,
+  metadata_json TEXT,
+  gameweek_scope TEXT,
+  is_active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(registry_id) REFERENCES ml_model_registry(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ml_model_versions_active_registry
+  ON ml_model_versions(registry_id)
+  WHERE is_active = 1;
+
 CREATE TABLE IF NOT EXISTS sync_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   started_at TEXT NOT NULL,

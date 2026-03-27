@@ -222,7 +222,7 @@ Deterministic post-processing:
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add explicit model registry tables and retryable ML sync state**
+- [x] **Unit 1: Add explicit model registry tables and retryable ML sync state**
 
 **Goal:** Introduce durable storage for model definitions/versions and a separate retryable state flag for pending ML evaluation work.
 
@@ -260,7 +260,7 @@ Deterministic post-processing:
 
 - The app can store versioned weights and retryable pending-evaluation state without conflating the two concerns.
 
-- [ ] **Unit 2: Build training-matrix service with strict no-lookahead semantics**
+- [x] **Unit 2: Build training-matrix service with strict no-lookahead semantics**
 
 **Goal:** Implement a reusable backend service that exposes trainer-ready supervised data for event modeling.
 
