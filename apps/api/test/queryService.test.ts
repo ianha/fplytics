@@ -987,4 +987,16 @@ describe("QueryService", () => {
     expect(bestOption?.nextGwGain ?? 0).toBeLessThan(8);
     expect(decision?.recommendedOptionId).toBe("roll");
   });
+
+  it("keeps current-gameweek xPts grounded when recent history includes a one-minute cameo outlier", () => {
+    const db = createDatabase(path.join(tempDir, "historical-low-minute-current-xpts.sqlite"));
+    seedHistoricalLowMinuteOutlierScenario(db);
+
+    const queryService = new QueryService(db);
+    const xpts = queryService.getPlayerXpts(30);
+    const beto = xpts.find((row) => row.playerId === 311);
+
+    expect(beto).toBeDefined();
+    expect(beto?.xpts ?? 0).toBeLessThan(8);
+  });
 });

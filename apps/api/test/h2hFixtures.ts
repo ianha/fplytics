@@ -11,8 +11,9 @@ export function seedH2HComparisonData(db: ReturnType<typeof createDatabase>) {
 
   db.prepare(
     `INSERT INTO teams (id, code, name, short_name, strength, updated_at)
-     VALUES (3, 8, 'Chelsea', 'CHE', 4, ?)`,
-  ).run(now());
+     VALUES (3, 8, 'Chelsea', 'CHE', 4, ?),
+            (4, 6, 'Spurs', 'TOT', 4, ?)`,
+  ).run(now(), now());
 
   const insertPlayer = db.prepare(
     `INSERT INTO players (
@@ -122,8 +123,20 @@ export function seedH2HComparisonData(db: ReturnType<typeof createDatabase>) {
     `INSERT INTO gameweeks (id, name, deadline_time, average_entry_score, highest_score, is_current, is_finished, updated_at)
      VALUES
      (1, 'Gameweek 1', ?, 50, 100, 0, 1, ?),
-     (2, 'Gameweek 2', ?, 51, 101, 1, 0, ?)`,
-  ).run("2026-08-15T10:00:00.000Z", now(), "2026-08-22T10:00:00.000Z", now());
+     (2, 'Gameweek 2', ?, 51, 101, 0, 1, ?),
+     (3, 'Gameweek 3', ?, 52, 102, 1, 0, ?)`,
+  ).run(
+    "2026-08-15T10:00:00.000Z", now(),
+    "2026-08-22T10:00:00.000Z", now(),
+    "2026-08-29T10:00:00.000Z", now(),
+  );
+
+  db.prepare(
+    `INSERT INTO fixtures (id, code, event_id, kickoff_time, team_h, team_a, team_h_score, team_a_score, finished, started, updated_at)
+     VALUES
+     (301, 1301, 3, '2026-08-29T15:00:00.000Z', 1, 4, NULL, NULL, 0, 0, ?),
+     (302, 1302, 3, '2026-08-30T15:00:00.000Z', 2, 3, NULL, NULL, 0, 0, ?)`,
+  ).run(now(), now());
 
   db.prepare(
     `INSERT INTO my_team_accounts (
@@ -266,5 +279,76 @@ export function seedH2HComparisonData(db: ReturnType<typeof createDatabase>) {
   }
   for (const [playerId, position, multiplier, isCaptain, isViceCaptain, gwPoints] of gw2RivalPicks) {
     insertRivalPick.run(501, 2, playerId, position, multiplier, isCaptain, isViceCaptain, gwPoints);
+  }
+
+  const historyProfiles = new Map<number, { xg: number; xa: number; xgc: number; minutes: number; teamId: number }>([
+    [20, { xg: 0.02, xa: 0.01, xgc: 0.65, minutes: 90, teamId: 1 }],
+    [21, { xg: 0.10, xa: 0.03, xgc: 0.60, minutes: 90, teamId: 1 }],
+    [22, { xg: 0.48, xa: 0.12, xgc: 1.05, minutes: 86, teamId: 3 }],
+    [23, { xg: 0.42, xa: 0.30, xgc: 1.00, minutes: 88, teamId: 3 }],
+    [24, { xg: 0.08, xa: 0.04, xgc: 0.88, minutes: 82, teamId: 1 }],
+    [25, { xg: 0.10, xa: 0.05, xgc: 0.95, minutes: 84, teamId: 3 }],
+    [26, { xg: 0.14, xa: 0.06, xgc: 0.98, minutes: 85, teamId: 1 }],
+    [27, { xg: 0.18, xa: 0.08, xgc: 1.00, minutes: 83, teamId: 3 }],
+    [28, { xg: 0.12, xa: 0.04, xgc: 0.92, minutes: 80, teamId: 1 }],
+    [10, { xg: 0.54, xa: 0.22, xgc: 0.90, minutes: 89, teamId: 1 }],
+    [11, { xg: 0.70, xa: 0.25, xgc: 0.85, minutes: 90, teamId: 2 }],
+    [12, { xg: 0.32, xa: 0.19, xgc: 0.88, minutes: 84, teamId: 1 }],
+  ]);
+
+  const insertHistory = db.prepare(
+    `INSERT INTO player_history (
+      player_id, round, total_points, minutes, goals_scored, assists, clean_sheets, bonus, bps, creativity,
+      influence, threat, ict_index, expected_goals, expected_assists, expected_goal_involvements,
+      expected_goal_performance, expected_assist_performance, expected_goal_involvement_performance,
+      expected_goals_conceded, tackles, recoveries, clearances_blocks_interceptions, defensive_contribution,
+      saves, yellow_cards, red_cards, own_goals, penalties_saved, penalties_missed, goals_conceded, starts,
+      opponent_team, team_id, value, was_home, kickoff_time, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  for (const [playerId, profile] of historyProfiles) {
+    for (const round of [1, 2]) {
+      insertHistory.run(
+        playerId,
+        round,
+        6,
+        profile.minutes,
+        0,
+        0,
+        profile.teamId === 1 ? 1 : 0,
+        1,
+        20,
+        12,
+        18,
+        20,
+        5,
+        profile.xg,
+        profile.xa,
+        profile.xg + profile.xa,
+        0,
+        0,
+        0,
+        profile.xgc,
+        1,
+        3,
+        1,
+        2,
+        playerId === 20 ? 3 : 0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        profile.teamId === 1 ? 1 : 0,
+        1,
+        profile.teamId === 2 ? 3 : 2,
+        profile.teamId,
+        100,
+        round % 2 === 0 ? 1 : 0,
+        `2026-08-${14 + round}T15:00:00.000Z`,
+        now(),
+      );
+    }
   }
 }

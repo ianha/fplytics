@@ -379,6 +379,37 @@ export type H2HPositionalAudit = {
   rows: H2HPositionAuditRow[];
 };
 
+export type H2HLuckVerdict =
+  | "balanced"
+  | "rival_running_hot"
+  | "user_running_hot"
+  | "insufficient_data";
+
+export type H2HLuckDataQuality = "full" | "partial" | "insufficient";
+
+export type H2HLuckVsSkill = {
+  basedOnGameweek: number;
+  actualDelta: number;
+  expectedDelta: number | null;
+  userActualPoints: number;
+  rivalActualPoints: number;
+  userExpectedPoints: number | null;
+  rivalExpectedPoints: number | null;
+  userVariance: number | null;
+  rivalVariance: number | null;
+  varianceEdge: number | null;
+  verdict: H2HLuckVerdict;
+  dataQuality: H2HLuckDataQuality;
+  missingPlayerProjections: number;
+};
+
+export type H2HSyncStatus = {
+  currentGameweek: number | null;
+  lastSyncedGw: number | null;
+  stale: boolean;
+  fetchedAt: string | null;
+};
+
 export type H2HComparisonResponse = {
   syncRequired: boolean;
   rivalEntry: H2HLeagueStanding | null;
@@ -386,6 +417,8 @@ export type H2HComparisonResponse = {
   gmRankHistory: GmRankHistory[];
   attribution: H2HAttributionBreakdown | null;
   positionalAudit: H2HPositionalAudit | null;
+  luckVsSkill: H2HLuckVsSkill | null;
+  syncStatus: H2HSyncStatus;
 };
 
 export type LivePlayerPoints = {

@@ -1,7 +1,7 @@
 ---
 title: feat: H2H Mini-League Delivery Schedule
 type: feat
-status: active
+status: completed
 date: 2026-04-13
 origin: docs/prd/prd_fpl_diagnostic_analytics_h2h_mini_league.md
 ---
@@ -364,7 +364,7 @@ Why this phase lands last:
 **Verification:**
 - The page identifies where the user trails or leads by position with both raw output and efficiency context.
 
-- [ ] **Unit 6: Add luck-vs-skill index**
+- [x] **Unit 6: Add luck-vs-skill index**
 
 **Goal:** Deliver the expected-vs-actual comparison that distinguishes sustainable performance from variance.
 
@@ -401,7 +401,7 @@ Why this phase lands last:
 **Verification:**
 - The page can distinguish rival overperformance from sustainable expected output without reintroducing known xPts aggregation bugs.
 
-- [ ] **Unit 7: Release hardening, stale-data UX, and regression coverage**
+- [x] **Unit 7: Release hardening, stale-data UX, and regression coverage**
 
 **Goal:** Make the full feature ship-ready after all analytics slices exist.
 

@@ -134,6 +134,7 @@ const COLUMN_ANNOTATIONS: Readonly<Record<string, Record<string, string>>> = {
     overall_rank:    "Latest known overall rank for the rival",
     total_points:    "Latest known cumulative points for the rival",
     last_synced_gw:  "Most recent gameweek successfully persisted for this rival",
+    fetched_at:      "Timestamp of the latest standings or rival refresh used for stale-sync messaging",
   },
   rival_gameweeks: {
     entry_id:             "References rival_entries.entry_id",
@@ -393,6 +394,7 @@ FPlytics computes xPts per player for the next gameweek via GET /api/players/xpt
          × fixture_difficulty_multiplier (0.75–1.2 based on FDR)
 All inputs use the player's last 5 GW averages from player_history. Players with <2 GW history return xPts: null.
 Use xPts when the user asks: "who should I captain?", "who has the best fixture?", "who should I buy?".
+For H2H rival diagnostics, compare current-squad expected edge to the stored actual points gap and treat low-minute outlier rows conservatively.
 
 ## FDR (Fixture Difficulty Rating)
 FPlytics computes xG-based FDR via GET /api/fixtures/fdr — not the official FPL 1–5 rating.

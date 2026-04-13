@@ -3,9 +3,11 @@ import type {
   GmRankHistory,
   H2HComparisonResponse,
   H2HLeagueStanding,
+  H2HLuckVsSkill,
   H2HPositionalAudit,
   H2HPositionTrend,
   H2HPlayerRef,
+  PlayerXpts,
   SquadOverlap,
 } from "@fpl/contracts";
 import type { AppDatabase } from "../db/database.js";
@@ -39,6 +41,11 @@ type TotalPointDeltaRow = {
   rivalTotalPoints: number;
 };
 
+type SyncStatusRow = {
+  lastSyncedGw: number | null;
+  fetchedAt: string | null;
+};
+
 type TotalRow = {
   total: number | null;
 };
@@ -58,7 +65,10 @@ function roundTo(value: number, digits: number) {
 }
 
 export class H2HQueryService {
-  constructor(private readonly db: AppDatabase) {}
+  constructor(
+    private readonly db: AppDatabase,
+    private readonly getPlayerXptsForGameweek: (gameweek?: number) => PlayerXpts[] = () => [],
+  ) {}
 
   getH2HComparison(
     accountId: number,
@@ -96,6 +106,8 @@ export class H2HQueryService {
       )
       .get(rivalEntryId);
 
+    const syncStatus = this.getSyncStatus(rivalEntryId);
+
     if (!leagueMembership || !rivalHasData) {
       return {
         syncRequired: true,
@@ -104,6 +116,8 @@ export class H2HQueryService {
         gmRankHistory: [],
         attribution: null,
         positionalAudit: null,
+        luckVsSkill: null,
+        syncStatus,
       };
     }
 
@@ -131,6 +145,11 @@ export class H2HQueryService {
         latestOverlapGameweek.gameweek === null
           ? null
           : this.getPositionalAudit(accountId, rivalEntryId, latestOverlapGameweek.gameweek),
+      luckVsSkill:
+        latestOverlapGameweek.gameweek === null
+          ? null
+          : this.getLuckVsSkill(accountId, rivalEntryId),
+      syncStatus,
     };
   }
 
@@ -513,5 +532,159 @@ export class H2HQueryService {
       return "lead";
     }
     return "level";
+  }
+
+  private getLuckVsSkill(accountId: number, rivalEntryId: number): H2HLuckVsSkill {
+    const syncStatus = this.getSyncStatus(rivalEntryId);
+    const currentGameweek = syncStatus.currentGameweek;
+    if (!currentGameweek) {
+      return {
+        basedOnGameweek: 0,
+        actualDelta: 0,
+        expectedDelta: null,
+        userActualPoints: 0,
+        rivalActualPoints: 0,
+        userExpectedPoints: null,
+        rivalExpectedPoints: null,
+        userVariance: null,
+        rivalVariance: null,
+        varianceEdge: null,
+        verdict: "insufficient_data",
+        dataQuality: "insufficient",
+        missingPlayerProjections: 0,
+      };
+    }
+
+    const xptsRows = this.getPlayerXptsForGameweek(currentGameweek);
+    const xptsMap = new Map(xptsRows.map((row) => [row.playerId, row.xpts]));
+    const userExpected = this.sumProjectedPoints("my_team_picks", "account_id", accountId, syncStatus.lastSyncedGw, xptsMap);
+    const rivalExpected = this.sumProjectedPoints("rival_picks", "entry_id", rivalEntryId, syncStatus.lastSyncedGw, xptsMap);
+    const currentActual = this.db
+      .prepare(
+        `SELECT
+           mtg.total_points AS userTotalPoints,
+           rg.total_points AS rivalTotalPoints
+         FROM my_team_gameweeks mtg
+         INNER JOIN rival_gameweeks rg
+           ON rg.entry_id = @rivalEntryId
+          AND rg.gameweek_id = mtg.gameweek_id
+         WHERE mtg.account_id = @accountId
+         ORDER BY mtg.gameweek_id DESC
+         LIMIT 1`,
+      )
+      .get({ accountId, rivalEntryId }) as TotalPointDeltaRow | undefined;
+
+    const userActualPoints = currentActual?.userTotalPoints ?? 0;
+    const rivalActualPoints = currentActual?.rivalTotalPoints ?? 0;
+    const actualDelta = userActualPoints - rivalActualPoints;
+    const expectedDelta =
+      userExpected.total !== null && rivalExpected.total !== null
+        ? roundTo(userExpected.total - rivalExpected.total, 1)
+        : null;
+    const userVariance =
+      userExpected.total !== null ? roundTo(userActualPoints - userExpected.total, 1) : null;
+    const rivalVariance =
+      rivalExpected.total !== null ? roundTo(rivalActualPoints - rivalExpected.total, 1) : null;
+    const varianceEdge =
+      userVariance !== null && rivalVariance !== null
+        ? roundTo(rivalVariance - userVariance, 1)
+        : null;
+    const missingPlayerProjections = userExpected.missing + rivalExpected.missing;
+
+    return {
+      basedOnGameweek: currentGameweek,
+      actualDelta,
+      expectedDelta,
+      userActualPoints,
+      rivalActualPoints,
+      userExpectedPoints: userExpected.total,
+      rivalExpectedPoints: rivalExpected.total,
+      userVariance,
+      rivalVariance,
+      varianceEdge,
+      verdict: this.getLuckVerdict(varianceEdge, missingPlayerProjections),
+      dataQuality:
+        missingPlayerProjections === 0
+          ? "full"
+          : missingPlayerProjections >= 8
+            ? "insufficient"
+            : "partial",
+      missingPlayerProjections,
+    };
+  }
+
+  private sumProjectedPoints(
+    tableName: "my_team_picks" | "rival_picks",
+    ownerColumn: "account_id" | "entry_id",
+    ownerId: number,
+    gameweek: number | null,
+    xptsMap: Map<number, number | null>,
+  ) {
+    if (!gameweek) {
+      return { total: null as number | null, missing: 0 };
+    }
+
+    const rows = this.db
+      .prepare(
+        `SELECT player_id AS playerId, multiplier
+         FROM ${tableName}
+         WHERE ${ownerColumn} = ?
+           AND gameweek_id = ?
+           AND position <= 11`,
+      )
+      .all(ownerId, gameweek) as Array<{ playerId: number; multiplier: number }>;
+
+    let total = 0;
+    let missing = 0;
+    for (const row of rows) {
+      const xpts = xptsMap.get(row.playerId);
+      if (xpts === null || xpts === undefined) {
+        missing += 1;
+        continue;
+      }
+      total += xpts * Math.max(row.multiplier, 1);
+    }
+
+    return {
+      total: rows.length === missing ? null : roundTo(total, 1),
+      missing,
+    };
+  }
+
+  private getLuckVerdict(varianceEdge: number | null, missingPlayerProjections: number) {
+    if (varianceEdge === null || missingPlayerProjections >= 8) {
+      return "insufficient_data" as const;
+    }
+    if (varianceEdge >= 5) {
+      return "rival_running_hot" as const;
+    }
+    if (varianceEdge <= -5) {
+      return "user_running_hot" as const;
+    }
+    return "balanced" as const;
+  }
+
+  private getSyncStatus(rivalEntryId: number) {
+    const statusRow = this.db
+      .prepare(
+        `SELECT last_synced_gw AS lastSyncedGw, fetched_at AS fetchedAt
+         FROM rival_entries
+         WHERE entry_id = ?`,
+      )
+      .get(rivalEntryId) as SyncStatusRow | undefined;
+    const currentGw = this.db
+      .prepare(`SELECT id FROM gameweeks WHERE is_current = 1 ORDER BY id LIMIT 1`)
+      .get() as { id: number } | undefined;
+
+    return {
+      currentGameweek: currentGw?.id ?? null,
+      lastSyncedGw: statusRow?.lastSyncedGw ?? null,
+      stale:
+        statusRow?.lastSyncedGw !== null &&
+        statusRow?.lastSyncedGw !== undefined &&
+        currentGw?.id !== undefined &&
+        statusRow.lastSyncedGw < currentGw.id,
+      fetchedAt: statusRow?.fetchedAt ?? null,
+    };
   }
 }

@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   getGameweeks: vi.fn(),
   getPlayers: vi.fn(),
   getH2HComparison: vi.fn(),
+  syncH2HRival: vi.fn(),
   getMyTeam: vi.fn(),
   getMyTeamGameweekPicks: vi.fn(),
   getTransferDecision: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock("./api/client", () => ({
   getGameweeks: apiMocks.getGameweeks,
   getPlayers: apiMocks.getPlayers,
   getH2HComparison: apiMocks.getH2HComparison,
+  syncH2HRival: apiMocks.syncH2HRival,
   getMyTeam: apiMocks.getMyTeam,
   getMyTeamGameweekPicks: apiMocks.getMyTeamGameweekPicks,
   getTransferDecision: apiMocks.getTransferDecision,
@@ -178,6 +180,15 @@ describe("App", () => {
         rivalOnlyPlayers: [],
       },
       gmRankHistory: [],
+      attribution: null,
+      positionalAudit: null,
+      luckVsSkill: null,
+      syncStatus: {
+        currentGameweek: 3,
+        lastSyncedGw: 3,
+        stale: false,
+        fetchedAt: "2026-04-13T10:00:00.000Z",
+      },
     });
     apiMocks.getMyTeam.mockResolvedValue({
     accounts: [

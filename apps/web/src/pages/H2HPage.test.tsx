@@ -1,14 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { H2HPage, resetH2HPageCacheForTests } from "./H2HPage";
 
-const { getH2HComparisonMock } = vi.hoisted(() => ({
+const { getH2HComparisonMock, syncH2HRivalMock } = vi.hoisted(() => ({
   getH2HComparisonMock: vi.fn(),
+  syncH2HRivalMock: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => ({
   getH2HComparison: getH2HComparisonMock,
+  syncH2HRival: syncH2HRivalMock,
 }));
 
 function buildPayload(overrides: Record<string, unknown> = {}) {
@@ -99,6 +101,27 @@ function buildPayload(overrides: Record<string, unknown> = {}) {
         },
       ],
     },
+    luckVsSkill: {
+      basedOnGameweek: 3,
+      actualDelta: 6,
+      expectedDelta: 1.4,
+      userActualPoints: 132,
+      rivalActualPoints: 126,
+      userExpectedPoints: 58.2,
+      rivalExpectedPoints: 56.8,
+      userVariance: 73.8,
+      rivalVariance: 69.2,
+      varianceEdge: -4.6,
+      verdict: "balanced",
+      dataQuality: "full",
+      missingPlayerProjections: 0,
+    },
+    syncStatus: {
+      currentGameweek: 3,
+      lastSyncedGw: 2,
+      stale: false,
+      fetchedAt: "2026-04-13T09:00:00.000Z",
+    },
     ...overrides,
   };
 }
@@ -158,6 +181,18 @@ describe("H2HPage", () => {
     expect(screen.queryByText(/Defender[\s\S]*under-index/i)).not.toBeInTheDocument();
   });
 
+  it("renders a luck-vs-skill card for the current comparison", async () => {
+    getH2HComparisonMock.mockResolvedValue(buildPayload());
+
+    renderH2HPage();
+
+    expect(await screen.findByRole("heading", { name: /Luck vs skill/i })).toBeInTheDocument();
+    expect(screen.getByText(/Expected edge/i)).toBeInTheDocument();
+    expect(screen.getByText(/\+1\.4 pts/i)).toBeInTheDocument();
+    expect(screen.getByText(/Variance edge/i)).toBeInTheDocument();
+    expect(screen.getByText(/Balanced/i)).toBeInTheDocument();
+  });
+
   it("shows a sync-required state instead of comparison sections when rival data is missing", async () => {
     getH2HComparisonMock.mockResolvedValue(
       buildPayload({
@@ -166,12 +201,20 @@ describe("H2HPage", () => {
         gmRankHistory: [],
         attribution: null,
         positionalAudit: null,
+        luckVsSkill: null,
+        syncStatus: {
+          currentGameweek: 3,
+          lastSyncedGw: null,
+          stale: false,
+          fetchedAt: null,
+        },
       }),
     );
 
     renderH2HPage();
 
     expect(await screen.findByText(/Sync this rival to load comparison insights/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sync rival now/i })).toBeInTheDocument();
     expect(screen.queryByText(/86.7% overlap/i)).not.toBeInTheDocument();
   });
 
@@ -208,5 +251,44 @@ describe("H2HPage", () => {
     expect(screen.getByText(/73.3% overlap/i)).toBeInTheDocument();
     expect(getH2HComparisonMock).toHaveBeenNthCalledWith(1, 99, 501);
     expect(getH2HComparisonMock).toHaveBeenNthCalledWith(2, 99, 502);
+  });
+
+  it("re-syncs a stale rival and refetches the comparison instead of serving stale cache", async () => {
+    getH2HComparisonMock
+      .mockResolvedValueOnce(
+        buildPayload({
+          syncStatus: {
+            currentGameweek: 3,
+            lastSyncedGw: 2,
+            stale: true,
+            fetchedAt: "2026-04-13T08:00:00.000Z",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        buildPayload({
+          syncStatus: {
+            currentGameweek: 3,
+            lastSyncedGw: 3,
+            stale: false,
+            fetchedAt: "2026-04-13T10:00:00.000Z",
+          },
+        }),
+      );
+    syncH2HRivalMock.mockResolvedValue({ entryId: 501, syncedGameweeks: 3, lastSyncedGw: 3 });
+
+    renderH2HPage();
+
+    expect(await screen.findByText(/Last synced through GW 2/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Re-sync rival/i }));
+
+    await waitFor(() => {
+      expect(syncH2HRivalMock).toHaveBeenCalledWith(99, 501, {});
+    });
+    await waitFor(() => {
+      expect(getH2HComparisonMock).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByText(/Last synced through GW 2/i)).not.toBeInTheDocument();
   });
 });

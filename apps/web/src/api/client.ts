@@ -13,6 +13,7 @@ import type {
   GameweekSummary,
   MyTeamPageResponse,
   MyTeamGameweekPicksResponse,
+  RivalSyncResponse,
   TransferDecisionHorizon,
   TransferDecisionResponse,
 } from "@fpl/contracts";
@@ -108,6 +109,18 @@ export function getH2HComparison(
     `/leagues/${leagueId}/h2h/${rivalEntryId}${query ? `?${query}` : ""}`,
     options?.signal ? { signal: options.signal } : undefined,
   );
+}
+
+export function syncH2HRival(
+  leagueId: number,
+  rivalEntryId: number,
+  options?: { accountId?: number; type?: "classic" | "h2h" },
+) {
+  return requestWithBody<RivalSyncResponse>(`/leagues/${leagueId}/sync`, "POST", {
+    rivalEntryId,
+    accountId: options?.accountId ?? 1,
+    type: options?.type ?? "classic",
+  });
 }
 
 export function getTeams() {

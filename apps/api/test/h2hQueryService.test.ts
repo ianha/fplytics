@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createDatabase } from "../src/db/database.js";
 import { H2HQueryService } from "../src/services/h2hQueryService.js";
+import { QueryService } from "../src/services/queryService.js";
 import { seedH2HComparisonData } from "./h2hFixtures.js";
 
 const tempDirs: string[] = [];
@@ -20,12 +21,17 @@ afterEach(() => {
   }
 });
 
+function makeService(db: ReturnType<typeof createDatabase>) {
+  const queryService = new QueryService(db);
+  return new H2HQueryService(db, queryService.getPlayerXpts.bind(queryService));
+}
+
 describe("H2HQueryService", () => {
   it("returns overlap, differential players, and rank history for a synced rival", () => {
     const db = createDatabase(makeDbPath());
     seedH2HComparisonData(db);
 
-    const service = new H2HQueryService(db);
+    const service = makeService(db);
     const response = service.getH2HComparison(1, 99, 501);
 
     expect(response.syncRequired).toBe(false);
@@ -51,7 +57,7 @@ describe("H2HQueryService", () => {
     const db = createDatabase(makeDbPath());
     seedH2HComparisonData(db);
 
-    const service = new H2HQueryService(db);
+    const service = makeService(db);
     const response = service.getH2HComparison(1, 99, 501);
 
     expect(response.attribution).toEqual({
@@ -81,7 +87,7 @@ describe("H2HQueryService", () => {
     const db = createDatabase(makeDbPath());
     seedH2HComparisonData(db);
 
-    const service = new H2HQueryService(db);
+    const service = makeService(db);
     const response = service.getH2HComparison(1, 99, 501);
 
     expect(response.positionalAudit).toEqual({
@@ -138,13 +144,35 @@ describe("H2HQueryService", () => {
     });
   });
 
+  it("returns a luck-vs-skill view plus stale sync metadata for the current comparison", () => {
+    const db = createDatabase(makeDbPath());
+    seedH2HComparisonData(db);
+
+    const service = makeService(db);
+    const response = service.getH2HComparison(1, 99, 501);
+
+    expect(response.syncStatus).toMatchObject({
+      currentGameweek: 3,
+      lastSyncedGw: 2,
+      stale: true,
+    });
+    expect(response.luckVsSkill).toMatchObject({
+      basedOnGameweek: 3,
+      actualDelta: 6,
+      dataQuality: "full",
+      missingPlayerProjections: 0,
+    });
+    expect(response.luckVsSkill?.userExpectedPoints ?? 0).toBeGreaterThan(0);
+    expect(response.luckVsSkill?.rivalExpectedPoints ?? 0).toBeGreaterThan(0);
+  });
+
   it("returns syncRequired when rival comparison data has not been synced yet", () => {
     const db = createDatabase(makeDbPath());
     seedH2HComparisonData(db);
     db.prepare("DELETE FROM rival_picks WHERE entry_id = ?").run(501);
     db.prepare("DELETE FROM rival_gameweeks WHERE entry_id = ?").run(501);
 
-    const service = new H2HQueryService(db);
+    const service = makeService(db);
     const response = service.getH2HComparison(1, 99, 501);
 
     expect(response).toEqual({
@@ -160,6 +188,13 @@ describe("H2HQueryService", () => {
       gmRankHistory: [],
       attribution: null,
       positionalAudit: null,
+      luckVsSkill: null,
+      syncStatus: {
+        currentGameweek: 3,
+        lastSyncedGw: 2,
+        stale: true,
+        fetchedAt: expect.any(String),
+      },
     });
   });
 });

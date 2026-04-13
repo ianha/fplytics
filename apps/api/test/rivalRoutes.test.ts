@@ -190,6 +190,15 @@ describe("Rival league routes", () => {
       gameweek: 2,
       overlapPct: 93.3,
     });
+    expect(response.body.syncStatus).toMatchObject({
+      currentGameweek: 3,
+      lastSyncedGw: 2,
+      stale: true,
+    });
+    expect(response.body.luckVsSkill).toMatchObject({
+      basedOnGameweek: 3,
+      dataQuality: "full",
+    });
     expect(response.body.gmRankHistory).toEqual([
       { gameweek: 1, userOverallRank: 120000, rivalOverallRank: 130000 },
       { gameweek: 2, userOverallRank: 90000, rivalOverallRank: 98000 },

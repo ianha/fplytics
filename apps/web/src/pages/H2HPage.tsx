@@ -1,16 +1,20 @@
 import type { H2HComparisonResponse } from "@fpl/contracts";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getH2HComparison } from "@/api/client";
+import { getH2HComparison, syncH2HRival } from "@/api/client";
 import { GlowCard } from "@/components/ui/glow-card";
 import { Badge } from "@/components/ui/badge";
 import {
   describeBenchDelta,
+  formatExpectedEdge,
   formatGapShare,
   formatOverlapLabel,
   formatPlayerTag,
   formatSignedNumber,
   formatSignedPoints,
+  formatVarianceEdge,
+  getLuckVerdictDescription,
+  getLuckVerdictLabel,
   getTrendLabel,
 } from "./h2hPageUtils";
 
@@ -28,6 +32,8 @@ export function resetH2HPageCacheForTests() {
 export function H2HPage() {
   const { leagueId, rivalEntryId } = useParams<{ leagueId?: string; rivalEntryId?: string }>();
   const [state, setState] = useState<AsyncState>({ status: "loading" });
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (!leagueId || !rivalEntryId) {
@@ -40,6 +46,13 @@ export function H2HPage() {
           gmRankHistory: [],
           attribution: null,
           positionalAudit: null,
+          luckVsSkill: null,
+          syncStatus: {
+            currentGameweek: null,
+            lastSyncedGw: null,
+            stale: false,
+            fetchedAt: null,
+          },
         },
       });
       return;
@@ -72,7 +85,27 @@ export function H2HPage() {
     return () => {
       active = false;
     };
-  }, [leagueId, rivalEntryId]);
+  }, [leagueId, rivalEntryId, refreshNonce]);
+
+  async function handleSync() {
+    if (!leagueId || !rivalEntryId) {
+      return;
+    }
+
+    setSyncing(true);
+    try {
+      await syncH2HRival(Number(leagueId), Number(rivalEntryId), {});
+      _h2hCache.delete(`${leagueId}:${rivalEntryId}`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setState({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   if (state.status === "loading") {
     return <div className="p-6 text-white/80">Loading mini-league comparison…</div>;
@@ -109,6 +142,16 @@ export function H2HPage() {
           <p className="mt-2 text-xs text-white/45">
             Rival: {state.payload.rivalEntry.playerName}
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              void handleSync();
+            }}
+            className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={syncing}
+          >
+            {syncing ? "Syncing…" : "Sync rival now"}
+          </button>
         </GlowCard>
       </div>
     );
@@ -117,6 +160,8 @@ export function H2HPage() {
   const { rivalEntry, squadOverlap, gmRankHistory } = state.payload;
   const attribution = state.payload.attribution;
   const positionalAudit = state.payload.positionalAudit;
+  const luckVsSkill = state.payload.luckVsSkill;
+  const syncStatus = state.payload.syncStatus;
 
   return (
     <div className="space-y-6 p-6">
@@ -133,6 +178,31 @@ export function H2HPage() {
           </Link>
         </div>
       </GlowCard>
+
+      {syncStatus.stale ? (
+        <GlowCard className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">
+                Last synced through GW {syncStatus.lastSyncedGw}
+              </p>
+              <p className="text-sm text-white/60">
+                Current GW is {syncStatus.currentGameweek}. Re-sync to refresh the latest H2H snapshot.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void handleSync();
+              }}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={syncing}
+            >
+              {syncing ? "Syncing…" : "Re-sync rival"}
+            </button>
+          </div>
+        </GlowCard>
+      ) : null}
 
       <GlowCard className="p-6">
         <h2 className="font-display text-xl font-semibold text-white">Squad overlap</h2>
@@ -244,6 +314,51 @@ export function H2HPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </GlowCard>
+      ) : null}
+
+      {luckVsSkill ? (
+        <GlowCard className="p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-xl font-semibold text-white">Luck vs skill</h2>
+              <p className="mt-1 text-sm text-white/60">Based on GW {luckVsSkill.basedOnGameweek} xPts</p>
+            </div>
+            <Badge
+              variant={
+                luckVsSkill.verdict === "rival_running_hot"
+                  ? "lucky-lead"
+                  : luckVsSkill.verdict === "user_running_hot"
+                    ? "teal"
+                    : luckVsSkill.verdict === "insufficient_data"
+                      ? "outline"
+                      : "secondary"
+              }
+            >
+              {getLuckVerdictLabel(luckVsSkill.verdict)}
+            </Badge>
+          </div>
+
+          <p className="mt-3 text-sm text-white/70">
+            {getLuckVerdictDescription(luckVsSkill.verdict)}
+          </p>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <section className="rounded-xl bg-white/5 p-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-white/55">Expected edge</h3>
+              <p className="mt-2 text-lg font-semibold text-accent">{formatExpectedEdge(luckVsSkill.expectedDelta)}</p>
+              <p className="mt-2 text-sm text-white/70">
+                You: {luckVsSkill.userExpectedPoints?.toFixed(1) ?? "—"} · Rival: {luckVsSkill.rivalExpectedPoints?.toFixed(1) ?? "—"}
+              </p>
+            </section>
+            <section className="rounded-xl bg-white/5 p-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-white/55">Variance edge</h3>
+              <p className="mt-2 text-lg font-semibold text-accent">{formatVarianceEdge(luckVsSkill.varianceEdge)}</p>
+              <p className="mt-2 text-sm text-white/70">
+                Actual gap: {formatSignedPoints(luckVsSkill.actualDelta)}
+              </p>
+            </section>
           </div>
         </GlowCard>
       ) : null}

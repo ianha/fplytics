@@ -231,7 +231,7 @@ export class QueryService {
   constructor(private readonly db: AppDatabase) {
     this.managerRoiService = new ManagerRoiService(db);
     this.mlModelRegistryService = new MlModelRegistryService(db);
-    this.h2hQueryService = new H2HQueryService(db);
+    this.h2hQueryService = new H2HQueryService(db, this.getPlayerXpts.bind(this));
   }
 
   getGameweeks(): GameweekSummary[] {

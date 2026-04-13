@@ -43,3 +43,43 @@ export function getTrendLabel(trend: H2HPositionTrend) {
       return "Level";
   }
 }
+
+export function formatExpectedEdge(value: number | null) {
+  if (value === null) {
+    return "Expected edge unavailable";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)} pts`;
+}
+
+export function formatVarianceEdge(value: number | null) {
+  if (value === null) {
+    return "Variance edge unavailable";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)} pts`;
+}
+
+export function getLuckVerdictLabel(verdict: "balanced" | "rival_running_hot" | "user_running_hot" | "insufficient_data") {
+  switch (verdict) {
+    case "rival_running_hot":
+      return "Rival running hot";
+    case "user_running_hot":
+      return "You are running hot";
+    case "insufficient_data":
+      return "Insufficient xPts";
+    default:
+      return "Balanced";
+  }
+}
+
+export function getLuckVerdictDescription(verdict: "balanced" | "rival_running_hot" | "user_running_hot" | "insufficient_data") {
+  switch (verdict) {
+    case "rival_running_hot":
+      return "Your rival is outperforming the underlying xPts baseline more than you are.";
+    case "user_running_hot":
+      return "Your current lead is running ahead of the underlying xPts baseline.";
+    case "insufficient_data":
+      return "Too many player projections are missing to label the edge confidently.";
+    default:
+      return "The actual gap is close to the projected edge from current squad process.";
+  }
+}
