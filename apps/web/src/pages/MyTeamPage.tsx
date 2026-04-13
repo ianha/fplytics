@@ -888,47 +888,6 @@ export function MyTeamPage() {
         {/* ── MAIN GRID: Pitch + Planner ───────────────────────────── */}
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
 
-          {/* Captain Recommendations */}
-          {captainRecs.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, duration: 0.4 }}>
-              <GlowCard className="p-4 sm:p-5" glowColor="purple">
-                <div className="flex items-center gap-2 mb-3">
-                  <Crown className="h-4 w-4 text-yellow-400" />
-                  <span className="text-sm font-semibold text-white/80">Suggested Captain</span>
-                  <span className="text-xs text-white/40 ml-auto">GW{payload?.currentGameweek} · based on xPts</span>
-                </div>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  {captainRecs.map((rec) => (
-                    <div
-                      key={rec.playerId}
-                      className={cn(
-                        "flex-1 flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
-                        rec.rank === 1
-                          ? "border-yellow-500/30 bg-yellow-500/10"
-                          : "border-white/8 bg-white/4",
-                      )}
-                    >
-                      <div className={cn(
-                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-                        rec.rank === 1 ? "bg-yellow-500/20 text-yellow-300" : "bg-white/10 text-white/50",
-                      )}>
-                        {rec.rank === 1 ? "C" : `#${rec.rank}`}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-white truncate">{rec.playerName}</p>
-                        <p className="text-[10px] text-white/40 truncate">{rec.reasoning}</p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="font-display text-base font-bold text-accent">{rec.xpts?.toFixed(1)}</p>
-                        <p className="text-[9px] text-white/30">xPts</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </GlowCard>
-            </motion.div>
-          )}
-
           {/* Pitch View */}
           <motion.div className="min-w-0" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08, duration: 0.45 }}>
             <GlowCard className="overflow-hidden p-5 sm:p-6" glowColor="teal">
@@ -1185,6 +1144,47 @@ export function MyTeamPage() {
               })()}
             </GlowCard>
           </motion.div>
+
+          {/* Captain Recommendations */}
+          {captainRecs.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, duration: 0.4 }}>
+              <GlowCard className="p-4 sm:p-5" glowColor="purple">
+                <div className="flex items-center gap-2 mb-3">
+                  <Crown className="h-4 w-4 text-yellow-400" />
+                  <span className="text-sm font-semibold text-white/80">Suggested Captain</span>
+                  <span className="text-xs text-white/40 ml-auto">GW{payload?.currentGameweek} · based on xPts</span>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {captainRecs.map((rec) => (
+                    <div
+                      key={rec.playerId}
+                      className={cn(
+                        "flex-1 flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+                        rec.rank === 1
+                          ? "border-yellow-500/30 bg-yellow-500/10"
+                          : "border-white/8 bg-white/4",
+                      )}
+                    >
+                      <div className={cn(
+                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                        rec.rank === 1 ? "bg-yellow-500/20 text-yellow-300" : "bg-white/10 text-white/50",
+                      )}>
+                        {rec.rank === 1 ? "C" : `#${rec.rank}`}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-white truncate">{rec.playerName}</p>
+                        <p className="text-[10px] text-white/40 truncate">{rec.reasoning}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-display text-base font-bold text-accent">{rec.xpts?.toFixed(1)}</p>
+                        <p className="text-[9px] text-white/30">xPts</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </GlowCard>
+            </motion.div>
+          )}
 
           {/* Transfer Planner */}
           <motion.div className="min-w-0" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14, duration: 0.45 }}>
