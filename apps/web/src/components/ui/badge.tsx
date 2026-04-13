@@ -16,6 +16,13 @@ const badgeVariants = cva(
         magenta: "border-transparent bg-primary/20 text-primary",
         position:
           "border-border/50 bg-secondary/50 text-muted-foreground font-medium",
+        // H2H luck/skill states
+        "lucky-lead":
+          "border-transparent bg-primary/15 text-primary font-semibold",   // rival running hot — magenta
+        "unlucky-deficit":
+          "border-transparent bg-accent/15 text-accent font-semibold",     // user underperforming xP — teal
+        "under-index":
+          "border-destructive/40 bg-destructive/10 text-destructive-foreground font-medium",
       },
     },
     defaultVariants: {
