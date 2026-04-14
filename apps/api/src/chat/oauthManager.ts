@@ -7,7 +7,14 @@ const DATA_DIR = path.dirname(env.dbPath);
 const TOKENS_FILE = path.join(DATA_DIR, "llm-tokens.json");
 
 const SCOPES = ["https://www.googleapis.com/auth/generative-language.retriever"];
-export const GOOGLE_REDIRECT_URI = "http://localhost:4000/api/chat/auth/google/callback";
+
+function resolvePublicApiUrl() {
+  return env.publicUrl || `http://localhost:${env.port}`;
+}
+
+export function getGoogleRedirectUri() {
+  return `${resolvePublicApiUrl()}/api/chat/auth/google/callback`;
+}
 
 // ── Token file I/O ──────────────────────────────────────────────────────────
 
@@ -36,7 +43,7 @@ export interface OAuthProviderConfig {
 
 /** Build the Google consent-screen URL to redirect (or open in tab) for `providerId`. */
 export function getAuthUrl(config: OAuthProviderConfig, providerId: string): string {
-  const client = new OAuth2Client(config.clientId, config.clientSecret, GOOGLE_REDIRECT_URI);
+  const client = new OAuth2Client(config.clientId, config.clientSecret, getGoogleRedirectUri());
   return client.generateAuthUrl({
     access_type: "offline",
     scope: SCOPES,
@@ -64,7 +71,7 @@ export async function handleCallbackWithConfig(
   code: string,
   providerId: string,
 ): Promise<void> {
-  const client = new OAuth2Client(config.clientId, config.clientSecret, GOOGLE_REDIRECT_URI);
+  const client = new OAuth2Client(config.clientId, config.clientSecret, getGoogleRedirectUri());
   const { tokens } = await client.getToken(code);
   const store = readTokens();
   store[providerId] = {
@@ -88,7 +95,8 @@ export async function getAccessToken(
     throw new Error(`No OAuth tokens found for provider "${providerId}". Sign in first.`);
   }
 
-  const client = new OAuth2Client(config.clientId, config.clientSecret, GOOGLE_REDIRECT_URI);
+  const redirectUri = getGoogleRedirectUri();
+  const client = new OAuth2Client(config.clientId, config.clientSecret, redirectUri);
   client.setCredentials({
     refresh_token: saved.refresh_token,
     access_token: saved.access_token,

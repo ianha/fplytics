@@ -7,6 +7,7 @@ import * as oauthManager from "./oauthManager.js";
 import { streamAnthropic } from "./providers/anthropic.js";
 import { streamOpenAI } from "./providers/openai.js";
 import { streamGemini } from "./providers/gemini.js";
+import { env } from "../config/env.js";
 
 function isApiKeyProvider(config: ProviderConfig): config is ApiKeyProviderConfig {
   return !("auth" in config);
@@ -140,7 +141,7 @@ export function createChatRouter(db: AppDatabase): Router {
     try {
       await oauthManager.handleCallbackWithConfig(config, code, providerId);
       // Redirect back to the web app with success signal
-      res.redirect("http://localhost:5173/chat?oauth_connected=true");
+      res.redirect(`${env.webUrl}/chat?oauth_connected=true`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       res.status(500).send(`OAuth callback failed: ${msg}`);

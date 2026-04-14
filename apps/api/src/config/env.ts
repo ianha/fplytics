@@ -30,4 +30,7 @@ export const env = {
   // PUBLIC_URL: canonical public-facing origin for the API server (e.g. https://fplytics.example.com).
   // Used to build absolute URLs in OG meta tags. When unset, the origin is inferred from the request.
   publicUrl: process.env.PUBLIC_URL?.replace(/\/$/, "") ?? "",
+  // WEB_URL: public-facing origin for the web app (e.g. https://app.fplytics.example.com).
+  // Used for redirects back into the SPA after external OAuth handshakes.
+  webUrl: process.env.WEB_URL?.replace(/\/$/, "") ?? "http://localhost:5173",
 };

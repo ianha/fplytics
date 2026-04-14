@@ -56,13 +56,14 @@ export function parseLinkMyTeamArgs(argv: string[]) {
 
 async function run() {
   const { email, password, entryId } = parseLinkMyTeamArgs(process.argv.slice(2));
-  const db = createDatabase();
-  const service = new MyTeamSyncService(db);
+  void email;
+  void password;
+  void entryId;
+  void createDatabase;
+  void MyTeamSyncService;
 
-  const accountId = service.linkAccount(email, password, entryId);
-  const result = await service.syncAccount(accountId, true);
-  console.log(
-    `My Team account linked for ${email}. Account ${accountId} synced ${result.syncedGameweeks} gameweek(s)${entryId ? ` using entry ${entryId}` : ""}.`,
+  throw new Error(
+    "Password-based linking has been removed. Link your FPL account from the web app OAuth flow instead.",
   );
 }
 

@@ -170,15 +170,29 @@ export function H2HPage() {
   }
 
   if (state.payload.syncRequired || !state.payload.squadOverlap) {
+    const rivalEntry = state.payload.rivalEntry;
+    if (!rivalEntry) {
+      return (
+        <div className="p-6">
+          <GlowCard className="p-6">
+            <h1 className="font-display text-2xl font-bold text-white">Rival not available</h1>
+            <p className="mt-3 text-sm text-white/70">
+              Sync this rival to load comparison insights.
+            </p>
+          </GlowCard>
+        </div>
+      );
+    }
+
     return (
       <div className="p-6">
         <GlowCard className="p-6">
-          <h1 className="font-display text-2xl font-bold text-white">{state.payload.rivalEntry.teamName}</h1>
+          <h1 className="font-display text-2xl font-bold text-white">{rivalEntry.teamName}</h1>
           <p className="mt-3 text-sm text-white/70">
             Sync this rival to load comparison insights.
           </p>
           <p className="mt-2 text-xs text-white/45">
-            Rival: {state.payload.rivalEntry.playerName}
+            Rival: {rivalEntry.playerName}
           </p>
           <button
             type="button"
@@ -200,6 +214,10 @@ export function H2HPage() {
   const positionalAudit = state.payload.positionalAudit;
   const luckVsSkill = state.payload.luckVsSkill;
   const syncStatus = state.payload.syncStatus;
+
+  if (!rivalEntry) {
+    return <div className="p-6 text-red-300">Rival data is unavailable for this comparison.</div>;
+  }
 
   return (
     <div className="space-y-6 p-6">

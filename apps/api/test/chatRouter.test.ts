@@ -2,6 +2,7 @@ import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatRouter } from "../src/chat/chatRouter.js";
+import { env } from "../src/config/env.js";
 
 const providerConfigMocks = vi.hoisted(() => ({
   listProviderInfos: vi.fn(),
@@ -51,6 +52,7 @@ describe("chatRouter", () => {
     providerStreamMocks.streamAnthropic.mockResolvedValue(undefined);
     providerStreamMocks.streamGemini.mockResolvedValue(undefined);
     providerStreamMocks.streamOpenAI.mockResolvedValue(undefined);
+    env.webUrl = "http://localhost:5173";
   });
 
   it("returns configured provider infos", async () => {
@@ -202,6 +204,8 @@ describe("chatRouter", () => {
   });
 
   it("redirects back to the web app after a successful oauth callback", async () => {
+    env.webUrl = "https://app.fplytics.test";
+
     providerConfigMocks.getProviderById.mockReturnValue({
       id: "google-main",
       name: "Gemini",
@@ -217,7 +221,7 @@ describe("chatRouter", () => {
       .query({ code: "auth-code", state: "google-main" })
       .expect(302);
 
-    expect(response.headers.location).toBe("http://localhost:5173/chat?oauth_connected=true");
+    expect(response.headers.location).toBe("https://app.fplytics.test/chat?oauth_connected=true");
     expect(oauthManagerMocks.handleCallbackWithConfig).toHaveBeenCalledWith(
       expect.objectContaining({ id: "google-main" }),
       "auth-code",

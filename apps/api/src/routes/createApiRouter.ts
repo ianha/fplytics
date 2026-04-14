@@ -170,7 +170,8 @@ export function createApiRouter(db: AppDatabase) {
         `INSERT INTO rival_leagues (league_id, league_type, league_name, account_id, synced_at)
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(league_id, league_type, account_id) DO UPDATE SET
-           league_name = excluded.league_name`,
+           league_name = excluded.league_name,
+           synced_at = excluded.synced_at`,
       );
       db.transaction(() => {
         for (const league of data.leagues.classic) {

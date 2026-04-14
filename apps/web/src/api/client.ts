@@ -36,8 +36,12 @@ function resolveApiBaseUrl() {
 const API_BASE_URL = resolveApiBaseUrl();
 export const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
 
+function buildApiUrl(path: string) {
+  return `${API_BASE_URL}${path}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  const response = await fetch(buildApiUrl(path), init);
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
@@ -45,7 +49,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestWithBody<T>(path: string, method: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     method,
     headers: {
       "content-type": "application/json",
@@ -232,7 +236,7 @@ export function subscribeLiveGw(
   gw: number,
   onUpdate: (u: LiveGwUpdate) => void,
 ): () => void {
-  const es = new EventSource(`/api/live/gw/${gw}/stream`);
+  const es = new EventSource(buildApiUrl(`/live/gw/${gw}/stream`));
   es.onmessage = (e) => {
     try {
       onUpdate(JSON.parse(e.data) as LiveGwUpdate);
@@ -260,7 +264,7 @@ export async function streamChat(
   providerId: string,
   messages: ChatMessage[],
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
-  const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+  const response = await fetch(buildApiUrl("/chat/stream"), {
     method: "POST",
     headers: {
       "content-type": "application/json",

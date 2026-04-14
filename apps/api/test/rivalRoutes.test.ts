@@ -226,4 +226,42 @@ describe("Rival league routes", () => {
       { gameweek: 2, userOverallRank: 90000, rivalOverallRank: 98000 },
     ]);
   });
+
+  it("refreshes synced_at when rediscovering an existing league", async () => {
+    const db = createDatabase(path.join(tempDir, "league-discovery.sqlite"));
+    seedPhaseOneData(db);
+    db.prepare(
+      `INSERT INTO rival_leagues (league_id, league_type, league_name, account_id, synced_at)
+       VALUES (99, 'classic', 'Old Writers ML', 1, '2026-01-01T00:00:00.000Z')`,
+    ).run();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const url = String(input);
+
+      if (url.endsWith("/entry/321/")) {
+        return new Response(JSON.stringify({
+          leagues: {
+            classic: [{ id: 99, name: "Writers ML" }],
+            h2h: [],
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      return new Response(JSON.stringify({ message: `Unhandled URL ${url}` }), { status: 404 });
+    }) as any);
+
+    const app = createApp(db);
+
+    const response = await request(app)
+      .post("/api/my-team/leagues/discover")
+      .send({ accountId: 1 })
+      .expect(200);
+
+    expect(response.body).toHaveLength(1);
+    expect(response.body[0]).toMatchObject({
+      leagueId: 99,
+      leagueName: "Writers ML",
+    });
+    expect(response.body[0].syncedAt).not.toBe("2026-01-01T00:00:00.000Z");
+  });
 });

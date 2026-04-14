@@ -1,11 +1,9 @@
 import type { AppDatabase } from "../db/database.js";
-import { annotateSchema, type SchemaTable } from "./schemaContext.js";
-
-/** Only SELECT and WITH (CTEs) are permitted. */
-function isSafeQuery(sql: string): boolean {
-  const first = sql.trim().toUpperCase().split(/\s+/)[0];
-  return first === "SELECT" || first === "WITH";
-}
+import {
+  buildDatabaseSchema,
+  executeReadOnlyQuery,
+  READ_ONLY_QUERY_ERROR_MESSAGE,
+} from "./databaseTools.js";
 
 export const FPL_TOOL_DEFINITIONS = [
   {
@@ -44,25 +42,7 @@ export function executeTool(
 ): string {
   if (name === "get_schema") {
     try {
-      const tables = db
-        .prepare(
-          "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        )
-        .all() as { name: string; sql: string }[];
-
-      const schema = tables.map((t) => ({
-        table: t.name,
-        createSql: t.sql,
-        columns: (db.prepare(`PRAGMA table_info(${t.name})`).all() as any[]).map((c) => ({
-          name: c.name,
-          type: c.type,
-          notNull: c.notnull === 1,
-          defaultValue: c.dflt_value,
-          primaryKey: c.pk > 0,
-        })),
-      })) satisfies SchemaTable[];
-
-      return JSON.stringify(annotateSchema(schema), null, 2);
+      return JSON.stringify(buildDatabaseSchema(db), null, 2);
     } catch (err) {
       return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -70,13 +50,11 @@ export function executeTool(
 
   if (name === "query") {
     const sql = String(input.sql ?? "");
-    if (!isSafeQuery(sql)) {
-      return JSON.stringify({ error: "Only SELECT or WITH queries are permitted." });
-    }
     try {
-      return JSON.stringify(db.prepare(sql).all());
+      return JSON.stringify(executeReadOnlyQuery(db, sql));
     } catch (err) {
-      return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      return JSON.stringify({ error: message || READ_ONLY_QUERY_ERROR_MESSAGE });
     }
   }
 
